@@ -5,10 +5,12 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
+from env_loader import load_project_env
 import urllib.request
 import json
 
 ROOT = Path.home() / "Downloads" / "Technemachina-Daemon-v0.1"
+load_project_env(ROOT)
 DAEMON = ROOT / "daemon"
 FRONTEND = ROOT / "frontend"
 
