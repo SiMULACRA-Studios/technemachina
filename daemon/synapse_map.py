@@ -255,8 +255,8 @@ def build_knowledge_entities() -> list[dict[str, Any]]:
 
 
 def build_candidate_entities() -> list[dict[str, Any]]:
-    thread_candidates = read_jsonl(MEMORY_DIR / "candidates.jsonl")
-    knowledge_candidates = read_jsonl(KNOWLEDGE_DIR / "knowledge_candidates.jsonl")
+    thread_candidates = load_thread_candidates_for_synapse()
+    knowledge_candidates = load_knowledge_candidates_for_synapse()
 
     entities = []
 
