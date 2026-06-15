@@ -728,7 +728,7 @@ def read_jsonl_many(paths: list[Path]) -> list[dict[str, Any]]:
     merged = []
     seen = set()
 
-    for path in paths:
+    for priority, path in enumerate(paths, start=1):
         for item in read_jsonl(path):
             key = (
                 item.get("record_id")
@@ -742,8 +742,12 @@ def read_jsonl_many(paths: list[Path]) -> list[dict[str, Any]]:
             if key in seen:
                 continue
 
+            enriched = dict(item)
+            enriched["_source_path"] = str(path.resolve())
+            enriched["_source_priority"] = priority
+
             seen.add(key)
-            merged.append(item)
+            merged.append(enriched)
 
     return merged
 
