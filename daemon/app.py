@@ -2,7 +2,7 @@ import json
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
@@ -194,11 +194,26 @@ async def synapse_analysis_payload():
     return synapse_analysis.get_analysis()
 
 @app.get("/synapse/map")
-async def synapse_map_payload(entity_type: str = "", relation_type: str = ""):
-    return synapse_map.get_map(
+async def synapse_map_payload(
+    entity_type: str = "",
+    relation_type: str = "",
+    view: str = "",
+):
+    payload = synapse_map.get_map(
         entity_type=entity_type,
         relation_type=relation_type,
     )
+
+    if not view:
+        return payload
+
+    try:
+        return synapse_map.project_map_by_scope(payload, view)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        ) from exc
 
 
 # --- End Technemachina Synapse Map Read-Only Backend ---
