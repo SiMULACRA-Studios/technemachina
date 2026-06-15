@@ -78,6 +78,24 @@ def classify_owner_scope(entity_type: str) -> str:
     return scope_by_type.get(entity_type, "unclassified")
 
 
+def metadata_with_provenance(
+    record: dict[str, Any],
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = dict(metadata or {})
+
+    source_path = record.get("_source_path")
+    source_priority = record.get("_source_priority")
+
+    if source_path:
+        result["_source_path"] = source_path
+
+    if isinstance(source_priority, int):
+        result["_source_priority"] = source_priority
+
+    return result
+
+
 def entity(
     *,
     entity_id: str,
@@ -240,7 +258,7 @@ def build_knowledge_entities() -> list[dict[str, Any]]:
             label=record.get("title") or record_id,
             status=status,
             weight=weight,
-            metadata={
+            metadata=metadata_with_provenance(record, {
                 "record_id": record_id,
                 "source_id": record.get("source_id", ""),
                 "summary": record.get("summary", ""),
@@ -248,7 +266,7 @@ def build_knowledge_entities() -> list[dict[str, Any]]:
                 "provenance": record.get("provenance", ""),
                 "memory_write_allowed": record.get("memory_write_allowed", False),
                 "candidate_path_allowed": record.get("candidate_path_allowed", False),
-            },
+            }),
         ))
 
     return entities
@@ -281,7 +299,7 @@ def build_candidate_entities() -> list[dict[str, Any]]:
             label=candidate.get("title") or candidate_id,
             status=status,
             weight=weight,
-            metadata={
+            metadata=metadata_with_provenance(candidate, {
                 "candidate_id": candidate_id,
                 "source_thread_id": candidate.get("source_thread_id", ""),
                 "record_type": candidate.get("record_type"),
@@ -289,7 +307,7 @@ def build_candidate_entities() -> list[dict[str, Any]]:
                 "confidence": candidate.get("confidence"),
                 "summary": candidate.get("summary", ""),
                 "why_candidate": candidate.get("why_candidate", ""),
-            },
+            }),
         ))
 
     for candidate in current_knowledge_candidates.values():
@@ -306,7 +324,7 @@ def build_candidate_entities() -> list[dict[str, Any]]:
             label=candidate.get("title") or candidate_id,
             status=status,
             weight=weight,
-            metadata={
+            metadata=metadata_with_provenance(candidate, {
                 "candidate_id": candidate_id,
                 "knowledge_record_id": candidate.get("knowledge_record_id", ""),
                 "source_id": candidate.get("source_id", ""),
@@ -317,7 +335,7 @@ def build_candidate_entities() -> list[dict[str, Any]]:
                 "confidence": candidate.get("confidence"),
                 "review_id": candidate.get("review_id", ""),
                 "why_candidate": candidate.get("why_candidate", ""),
-            },
+            }),
         ))
 
     return entities
@@ -801,7 +819,7 @@ def build_review_entities() -> list[dict[str, Any]]:
             label=item.get("title") or item.get("summary") or review_id,
             status=status,
             weight=weight,
-            metadata={
+            metadata=metadata_with_provenance(item, {
                 "review_id": review_id,
                 "record_id": item.get("record_id"),
                 "record_type": item.get("record_type"),
@@ -813,7 +831,7 @@ def build_review_entities() -> list[dict[str, Any]]:
                 "created_at": item.get("created_at", ""),
                 "reviewed_at": item.get("reviewed_at", ""),
                 "reviewed_by": item.get("reviewed_by", ""),
-            },
+            }),
         ))
 
     for decision in decisions:
@@ -830,14 +848,14 @@ def build_review_entities() -> list[dict[str, Any]]:
             label=f"{status}: {decision.get('review_id', '')}",
             status=status,
             weight=weight,
-            metadata={
+            metadata=metadata_with_provenance(decision, {
                 "decision_id": decision_id,
                 "review_id": decision.get("review_id"),
                 "record_id": decision.get("record_id"),
                 "reviewed_by": decision.get("reviewed_by"),
                 "reviewed_at": decision.get("reviewed_at"),
                 "notes": decision.get("notes", ""),
-            },
+            }),
         ))
 
     return entities
@@ -1019,7 +1037,7 @@ def build_memory_entities() -> list[dict[str, Any]]:
             label=record.get("title") or record.get("summary") or record_id,
             status=status,
             weight=weight,
-            metadata={
+            metadata=metadata_with_provenance(record, {
                 "record_id": record_id,
                 "layer": layer,
                 "record_type": record.get("record_type"),
@@ -1032,7 +1050,7 @@ def build_memory_entities() -> list[dict[str, Any]]:
                 "review_state": record.get("review_state", ""),
                 "created_at": record.get("created_at", ""),
                 "updated_at": record.get("updated_at", ""),
-            },
+            }),
         ))
 
         if layer:
