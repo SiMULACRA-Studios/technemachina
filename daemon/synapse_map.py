@@ -199,7 +199,7 @@ def build_memory_entities() -> list[dict[str, Any]]:
 
 
 def build_knowledge_entities() -> list[dict[str, Any]]:
-    records = read_jsonl(KNOWLEDGE_DIR / "knowledge_records.jsonl")
+    records = load_knowledge_records_for_synapse()
     sources_registry = read_json(KNOWLEDGE_DIR / "knowledge_sources.json", {"sources": {}})
     sources = sources_registry.get("sources", {})
     entities = []
@@ -448,7 +448,7 @@ def build_relations() -> list[dict[str, Any]]:
     relations = []
 
     memory_records = read_jsonl(MEMORY_DIR / "memory_records.jsonl")
-    knowledge_records = read_jsonl(KNOWLEDGE_DIR / "knowledge_records.jsonl")
+    knowledge_records = load_knowledge_records_for_synapse()
     knowledge_candidates = read_jsonl(KNOWLEDGE_DIR / "knowledge_candidates.jsonl")
     thread_candidates = read_jsonl(MEMORY_DIR / "candidates.jsonl")
     review_queue = read_jsonl(MEMORY_DIR / "review_queue.jsonl")
@@ -772,6 +772,12 @@ def load_memory_records_for_synapse() -> list[dict[str, Any]]:
     )
 
 
+def load_knowledge_records_for_synapse() -> list[dict[str, Any]]:
+    return read_jsonl_many(
+        synapse_candidate_paths("knowledge", "knowledge_records.jsonl")
+    )
+
+
 def load_knowledge_candidates_for_synapse() -> list[dict[str, Any]]:
     return read_jsonl_many(synapse_candidate_paths("knowledge", "knowledge_candidates.jsonl"))
 
@@ -841,7 +847,7 @@ def build_relations() -> list[dict[str, Any]]:
     relations = []
 
     memory_records = load_memory_records_for_synapse()
-    knowledge_records = read_jsonl(KNOWLEDGE_DIR / "knowledge_records.jsonl")
+    knowledge_records = load_knowledge_records_for_synapse()
     knowledge_candidates = load_knowledge_candidates_for_synapse()
     thread_candidates = load_thread_candidates_for_synapse()
     review_queue = load_review_queue_for_synapse()
