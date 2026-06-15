@@ -688,6 +688,94 @@ def get_relations(relation_type: str = "") -> dict[str, Any]:
     }
 
 
+RECOGNIZED_OWNER_SCOPES = frozenset({
+    "personal",
+    "personal_governance",
+    "imported",
+    "imported_governance",
+    "developer",
+    "system",
+    "system_doctrine",
+})
+
+
+SCOPE_VIEWS: dict[str, frozenset[str]] = {
+    "personal": frozenset({"personal"}),
+    "personal_governance": frozenset({"personal_governance"}),
+    "imported_knowledge": frozenset({"imported"}),
+    "imported_governance": frozenset({"imported_governance"}),
+    "developer_history": frozenset({"developer"}),
+    "system": frozenset({"system"}),
+    "system_doctrine": frozenset({"system_doctrine"}),
+    "companion": frozenset({
+        "personal",
+        "personal_governance",
+        "imported",
+        "imported_governance",
+        "system",
+        "system_doctrine",
+    }),
+    "all": RECOGNIZED_OWNER_SCOPES,
+}
+
+
+def project_map_by_scope(
+    payload: dict[str, Any],
+    view: str,
+) -> dict[str, Any]:
+    normalized_view = str(view).strip()
+
+    if not normalized_view:
+        raise ValueError("Synapse scope view is required")
+
+    allowed_scopes = SCOPE_VIEWS.get(normalized_view)
+
+    if allowed_scopes is None:
+        valid_views = ", ".join(sorted(SCOPE_VIEWS))
+        raise ValueError(
+            f"Unknown Synapse scope view: {normalized_view}. "
+            f"Valid views: {valid_views}"
+        )
+
+    nodes = [
+        node
+        for node in payload.get("nodes", [])
+        if node.get("owner_scope") in allowed_scopes
+    ]
+
+    node_ids = {
+        node["id"]
+        for node in nodes
+        if node.get("id")
+    }
+
+    edges = [
+        edge
+        for edge in payload.get("edges", [])
+        if (
+            edge.get("source") in node_ids
+            and edge.get("target") in node_ids
+        )
+    ]
+
+    projected = dict(payload)
+    projected["nodes"] = nodes
+    projected["edges"] = edges
+
+    meta = dict(payload.get("meta", {}))
+    filters = dict(meta.get("filters", {}))
+    filters["scope_view"] = normalized_view
+
+    meta["node_count"] = len(nodes)
+    meta["edge_count"] = len(edges)
+    meta["filters"] = filters
+    meta["allowed_owner_scopes"] = sorted(allowed_scopes)
+
+    projected["meta"] = meta
+
+    return projected
+
+
 def get_map(entity_type: str = "", relation_type: str = "") -> dict[str, Any]:
     entity_payload = get_entities(entity_type=entity_type)
     relation_payload = get_relations(relation_type=relation_type)
