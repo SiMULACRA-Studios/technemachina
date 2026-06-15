@@ -5,10 +5,11 @@ import time
 import signal
 import subprocess
 import webbrowser
+import urllib.request
 from pathlib import Path
 from env_loader import load_project_env
 
-ROOT = Path.home() / "Downloads" / "Technemachina-Daemon-v0.1"
+ROOT = Path(__file__).resolve().parent
 load_project_env(ROOT)
 DAEMON = ROOT / "daemon"
 FRONTEND = ROOT / "frontend"
@@ -25,6 +26,26 @@ def start(name, cmd, cwd):
     p = subprocess.Popen(cmd, cwd=str(cwd))
     processes.append((name, p))
     return p
+
+
+def wait_for(url, label, seconds=25):
+    """Wait until a local HTTP service responds or the timeout expires."""
+    print(f"Waiting for {label}...")
+    deadline = time.time() + seconds
+    last_error = None
+
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=3) as response:
+                response.read(1)
+            print(f"  {label} online")
+            return True
+        except Exception as exc:
+            last_error = exc
+            time.sleep(1)
+
+    print(f"  {label} failed: {last_error}")
+    return False
 
 def stop_all(*_):
     print("\nStopping Technemachina servers...")
@@ -48,15 +69,24 @@ backend = start(
     DAEMON
 )
 
-time.sleep(3)
-
 frontend = start(
     "frontend on 5173",
     [PYTHON, "-m", "http.server", "5173"],
     FRONTEND
 )
 
-time.sleep(2)
+backend_ready = wait_for(
+    "http://127.0.0.1:8000/synapse/map",
+    "backend /synapse/map",
+)
+
+frontend_ready = wait_for(
+    "http://127.0.0.1:5173/index.html",
+    "frontend index",
+)
+
+if not backend_ready or not frontend_ready:
+    print("\nStartup verification failed. Synapse doctor will still run for diagnostics.")
 
 print("\nRunning Synapse doctor...")
 doctor = ROOT / "scripts" / "synapse_doctor.py"

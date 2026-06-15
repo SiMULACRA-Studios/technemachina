@@ -9,7 +9,7 @@ from env_loader import load_project_env
 import urllib.request
 import json
 
-ROOT = Path.home() / "Downloads" / "Technemachina-Daemon-v0.1"
+ROOT = Path(__file__).resolve().parent
 load_project_env(ROOT)
 DAEMON = ROOT / "daemon"
 FRONTEND = ROOT / "frontend"
