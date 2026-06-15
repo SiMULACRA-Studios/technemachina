@@ -59,6 +59,25 @@ def compact(value: str, limit: int = 240) -> str:
     return value[:limit]
 
 
+def classify_owner_scope(entity_type: str) -> str:
+    scope_by_type = {
+        "milestone": "developer",
+        "milestone_cluster": "developer",
+        "project_context": "developer",
+        "doctrine": "system_doctrine",
+        "memory_layer": "system",
+        "thread": "personal",
+        "memory_record": "personal",
+        "thread_candidate": "personal_governance",
+        "review_item": "personal_governance",
+        "review_decision": "personal_governance",
+        "knowledge_source": "imported",
+        "knowledge_record": "imported",
+        "knowledge_candidate": "imported_governance",
+    }
+    return scope_by_type.get(entity_type, "unclassified")
+
+
 def entity(
     *,
     entity_id: str,
@@ -71,6 +90,7 @@ def entity(
     return {
         "id": entity_id,
         "type": entity_type,
+        "owner_scope": classify_owner_scope(entity_type),
         "label": label or entity_id,
         "status": status or "unknown",
         "weight": weight,
