@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Technemachina Daemon v0.1</title>
+    <link rel="stylesheet" href="style.css?v=layout-match-20260614111703">
+</head>
+<body>
+    <div id="container">
+        <aside id="menu">
+            <h2>TECHNEMACHINA<br>DAEMON</h2>
+            <p class="sub" id="system-version-label">loading system...</p>
+            <p class="sub small" id="system-status-label">status pending</p>
+
+            <label>Model</label>
+            <select id="engine-select">
+                <option value="auto">Auto Router</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="gemini">Gemini</option>
+            </select>
+
+            <hr>
+
+            <section id="tool-panel">
+                <h3>Tools</h3>
+                <button onclick="runTool('explain')">Explain Content</button>
+                <button onclick="runTool('debug')">Debug Block</button>
+                <button onclick="runRiskCheck()">Risk Check</button>
+            </section>
+
+            <section id="thread-panel">
+                <div class="thread-panel-header">
+                    <h3>Threads</h3>
+                    <button id="new-thread-btn" type="button">+</button>
+                </div>
+
+                <div id="active-thread-label">Active: loading...</div>
+                <div id="thread-list"></div>
+
+                <button id="refresh-threads-btn" type="button">Refresh Threads</button>
+            </section>
+
+
+
+            <hr>
+            <section id="brain-panel">
+                <h3>Brain Status</h3>
+
+                <div class="provider-row">
+                    <span class="provider-light red" id="light-gemini"></span>
+                    <span>Gemini</span>
+                </div>
+
+                <div class="provider-row">
+                    <span class="provider-light red" id="light-openrouter"></span>
+                    <span>OpenRouter</span>
+                </div>
+
+                <div class="provider-row">
+                    <span class="provider-light red" id="light-perplexity"></span>
+                    <span>Perplexity</span>
+                </div>
+
+                <div class="provider-row">
+                    <span class="provider-light red" id="light-groq"></span>
+                    <span>Groq</span>
+                </div>
+
+                <div class="provider-row">
+                    <span class="provider-light red" id="light-openai"></span>
+                    <span>OpenAI</span>
+                </div>
+
+                <div class="provider-row">
+                    <span class="provider-light red" id="light-local"></span>
+                    <span>Local</span>
+                </div>
+
+                <button onclick="refreshBrainStatus()">Refresh Brains</button>
+            </section>
+
+            <hr>
+
+            <hr>
+
+            <h3>Learning Log</h3>
+            <input type="text" id="log-topic" placeholder="Topic">
+            <textarea id="log-body" placeholder="Notes"></textarea>
+            <button onclick="commitLog()">Save Entry</button>
+        </aside>
+
+        <main id="workspace">
+            <div id="mode-bar">
+                <button id="mode-chat-btn" class="mode-btn active" type="button">Chat</button>
+                <button id="mode-control-btn" class="mode-btn" type="button">Control Center</button>
+                <button id="mode-brain-btn" class="mode-btn" type="button">Brain Mode</button>
+                <button id="mode-synapse-btn" class="mode-btn" type="button">Synapse Map</button>
+            </div>
+
+            <section id="chat-page" class="mode-page active">
+                <div id="terminal-out">[Technemachina Daemon loading system context...]</div>
+                <div id="input-tray">
+                    <textarea id="cmd-in" placeholder="Ask a coding question, paste code, or request an explanation..."></textarea>
+                    <div id="input-actions">
+                        <button id="send-query-btn" type="button" onclick="dispatchChat()">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="control-center-page" class="mode-page">
+                <div class="control-center-header">
+                    <h2>Control Center</h2>
+                    <p>Read-only system, memory, and governance surface.</p>
+                </div>
+
+
+
+                <section id="memory-panel">
+                    <div class="memory-panel-header">
+                        <h3>Memory</h3>
+                        <button id="refresh-memory-btn" type="button">Refresh</button>
+                    </div>
+
+                    <div id="memory-health-strip" class="memory-health-strip">Memory health loading...</div>
+
+                    <div class="memory-grid">
+                        <div class="memory-card">
+                            <h4>Layers</h4>
+                            <div id="memory-layer-summary" class="memory-section">Memory layers loading...</div>
+                        </div>
+
+                        <div class="memory-card">
+                            <h4>Search / Explain</h4>
+                            <div class="memory-search-row">
+                                <input type="text" id="memory-search-input" placeholder="Search memory...">
+                                <button id="memory-search-btn" type="button">Search</button>
+                            </div>
+                            <div id="memory-search-results" class="memory-section">No memory search yet.</div>
+                        </div>
+                    </div>
+
+                    <div class="memory-grid wide">
+                        <div class="memory-card">
+                            <h4>Records</h4>
+                            <div id="memory-record-list" class="memory-list">Memory records loading...</div>
+                        </div>
+
+                        <div class="memory-card">
+                            <h4>Inspector</h4>
+                            <div id="memory-inspector" class="memory-section">Select or search a memory record to inspect provenance, confidence, and attach recommendation.</div>
+                        </div>
+
+                        <div class="memory-card">
+                            <h4>Review Queue</h4>
+                            <div id="memory-review-list" class="memory-list">Review queue loading...</div>
+                        </div>
+                    </div>
+
+                    <div id="review-control-panel" class="memory-grid review-control-grid">
+                        <div class="memory-card">
+                            <h4>Review Inspector</h4>
+                            <div id="review-inspector" class="memory-section">Select a review item to inspect the candidate, provenance, and ruling options.</div>
+                            <div id="review-action-row" class="review-action-row">
+                                <button id="review-approve-btn" type="button" disabled>Approve</button>
+                                <button id="review-reject-btn" type="button" disabled>Reject</button>
+                                <button id="review-defer-btn" type="button" disabled>Defer</button>
+                            </div>
+                        </div>
+
+                        <div class="memory-card">
+                            <h4>Decision Log</h4>
+                            <div id="review-decision-log" class="memory-list">Decision log loading...</div>
+                        </div>
+                    </div>
+                </section>
+
+            </section>
+
+            <section id="brain-page" class="mode-page">
+                <div class="brain-placeholder">
+                    <h2>Obsidian Brain</h2>
+                    <p>Brain Mode placeholder. Later this becomes the visual synapse surface for threads, memory, doctrine, and decisions.</p>
+                    <div class="brain-orb">OBSIDIAN<br>BRAIN</div>
+                </div>
+            </section>
+
+            <section id="synapse-map-page" class="mode-page">
+                <div class="synapse-shell">
+                    <div class="synapse-header">
+                        <div>
+                            <p class="panel-kicker">Synapse Map</p>
+                            <h2>Constellation Renderer</h2>
+                            <p class="synapse-subtitle">
+                                Read-only graph of memory, knowledge, candidates, reviews, decisions, threads, doctrine, and project context.
+                            </p>
+                        </div>
+                        <div class="synapse-actions">
+                            <button id="synapse-refresh-btn" class="ghost-btn" type="button">Refresh Map</button>
+                            <button id="synapse-analyze-btn" class="ghost-btn synapse-analyze-btn" type="button">Analyze Map</button>
+                        </div>
+                    </div>
+
+                    <div class="synapse-status-strip">
+                        <span id="synapse-version-pill">Version: —</span>
+                        <span id="synapse-node-count-pill">Nodes: —</span>
+                        <span id="synapse-edge-count-pill">Edges: —</span>
+                        <span id="synapse-readonly-pill">Read-only: —</span>
+                    </div>
+
+
+                                        <div class="synapse-map-view-controls">
+                        <button id="synapse-map-only-toggle" type="button">Map Only</button>
+                        <button id="synapse-show-cards-toggle" type="button">Show Cards</button>
+                    </div>
+
+                    <aside id="synapse-companion-console" class="synapse-companion-console">
+                        <div class="synapse-companion-header">
+                            <div>
+                                <p class="synapse-perception-kicker">Companion Surface</p>
+                                <h3>Synapse Console</h3>
+                            </div>
+                            <span id="synapse-companion-surface-pill" class="synapse-companion-pill">Map-local</span>
+                        </div>
+
+                        <div id="synapse-companion-context" class="synapse-companion-context">
+                            Looking at: No signal selected
+                        </div>
+
+                        <div id="synapse-companion-messages" class="synapse-companion-messages" aria-live="polite">
+                            <div class="synapse-companion-message companion">
+                                I am listening from Synapse Map context. Select a star or ask me about the current constellation.
+                            </div>
+                        </div>
+
+                        <div class="synapse-companion-quick-actions" aria-label="Synapse companion quick actions">
+                            <button type="button" data-companion-prompt="Explain selected">Explain selected</button>
+                            <button type="button" data-companion-prompt="Associations">Associations</button>
+                            <button type="button" data-companion-prompt="Summarize galaxy">Summarize galaxy</button>
+                            <button type="button" data-companion-prompt="Suggest next">Suggest next</button>
+                            <button type="button" data-companion-prompt="Reset view">Reset view</button>
+                        </div>
+
+                        <form id="synapse-companion-form" class="synapse-companion-form">
+                            <input id="synapse-companion-input" type="text" placeholder="Ask the companion about this map…" autocomplete="off" />
+                            <button type="submit">Send</button>
+                        </form>
+
+                        <p class="synapse-companion-boundary">
+                            Map-local console. View actions only. Memory mutation remains Oracle-gated.
+                        </p>
+                    </aside>
+
+<section id="synapse-perception-panel" class="synapse-perception-panel hidden" aria-label="Synapse perception briefing">
+                        <div class="synapse-perception-header">
+                            <div>
+                                <p class="synapse-perception-kicker">Synapse Perception</p>
+                                <h3 id="synapse-perception-title">Read-only map analysis</h3>
+                            </div>
+                            <span id="synapse-perception-badge" class="synapse-perception-badge">Read-only</span>
+                        </div>
+
+                        <p id="synapse-perception-overview" class="synapse-perception-overview">
+                            Press Analyze Map to generate a read-only structural briefing.
+                        </p>
+
+                        <section id="synapse-perception-detail-drawer" class="synapse-perception-detail-drawer hidden">
+                            <div class="synapse-perception-detail-header">
+                                <div>
+                                    <p class="synapse-perception-kicker">Active Perception Detail</p>
+                                    <h4 id="synapse-perception-detail-title">No perception card selected</h4>
+                                </div>
+                                <span id="synapse-perception-detail-confidence" class="synapse-confidence">inactive</span>
+                            </div>
+                                                        <div class="synapse-detail-return-controls">
+                                <button id="synapse-detail-back-to-map" type="button">Back to Map</button>
+                                <button id="synapse-detail-close" type="button">Close Detail</button>
+                            </div>
+
+<div id="synapse-perception-detail-body" class="synapse-perception-detail-body">
+                                Select a Central Signal or Bridge Candidate to inspect why it matters.
+                            </div>
+
+                            <div id="synapse-oracle-note-box" class="synapse-oracle-note-box hidden">
+                                <div class="synapse-oracle-note-boundary">
+                                    <strong>Oracle Note Draft</strong>
+                                    <span>Local only · Not sent to memory · Pending Oracle review</span>
+                                </div>
+
+                                <label for="synapse-oracle-note-input">Local Observation</label>
+                                <textarea id="synapse-oracle-note-input" rows="4" placeholder="Write a local Oracle observation about this signal or bridge. This stays in the browser only and does not mutate memory."></textarea>
+
+                                <div class="synapse-oracle-note-actions">
+                                    <button id="synapse-oracle-note-save-btn" class="ghost-btn" type="button">Save Local Draft</button>
+                                    <button id="synapse-oracle-note-clear-btn" class="ghost-btn" type="button">Clear Draft</button>
+                                </div>
+
+                                <p id="synapse-oracle-note-status" class="synapse-oracle-note-status">
+                                    Local draft only. Not sent to memory. Pending Oracle review.
+                                </p>
+                            </div>
+                        </section>
+
+                        <div class="synapse-perception-grid">
+                            <div class="synapse-perception-card">
+                                <h4>Galaxies</h4>
+                                <div id="synapse-perception-galaxies" class="synapse-perception-list"></div>
+                            </div>
+
+                            <div class="synapse-perception-card">
+                                <h4>Central Signals</h4>
+                                <div id="synapse-perception-central" class="synapse-perception-list"></div>
+                            </div>
+
+                            <div class="synapse-perception-card">
+                                <h4>Bridge Candidates</h4>
+                                <div id="synapse-perception-bridges" class="synapse-perception-list"></div>
+                            </div>
+
+                            <div class="synapse-perception-card">
+                                <h4>Limitations</h4>
+                                <div id="synapse-perception-limitations" class="synapse-perception-list"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <div class="synapse-layout">
+                        <div class="synapse-canvas-card">
+                            <canvas id="synapse-canvas"></canvas>
+
+                            <div class="synapse-zoom-controls" aria-label="Synapse map zoom controls">
+                                <button id="synapse-zoom-out-btn" class="synapse-zoom-btn" type="button" title="Zoom out">−</button>
+                                <button id="synapse-zoom-reset-btn" class="synapse-zoom-reset-btn" type="button" title="Reset zoom">Reset</button>
+                                <button id="synapse-zoom-in-btn" class="synapse-zoom-btn" type="button" title="Zoom in">+</button>
+
+                                <button id="synapse-drag-mode-btn" class="synapse-zoom-reset-btn" type="button" title="Toggle drag mode">Drag: Pan</button>
+                                <button id="synapse-orbit-lock-btn" class="synapse-zoom-reset-btn" type="button" title="Lock or resume rotation">Lock</button>
+                                <button id="synapse-focus-btn" class="synapse-zoom-reset-btn" type="button" title="Focus selected star">Focus</button>
+
+                            </div>
+
+                            <div id="synapse-tooltip" class="synapse-tooltip hidden"></div>
+                        </div>
+
+                        <aside class="synapse-inspector">
+                            <p class="panel-kicker">Inspector</p>
+                            <h3 id="synapse-inspector-title">Select a star</h3>
+                            <p id="synapse-inspector-subtitle">
+                                Click a node or relation to inspect it. This surface is read-only.
+                            </p>
+                            <pre id="synapse-inspector-json">{}</pre>
+                        </aside>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script src="main.js?v=layout-match-20260614111703"></script>
+</body>
+</html>

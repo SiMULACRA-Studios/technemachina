@@ -1,0 +1,71 @@
+# Technemachina Git safety rules
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+*.log
+logs/
+tmp/
+.cache/
+.vscode/
+.idea/
+recovery_snapshots/*.tar.gz
+recovery_snapshots/*.tar.gz.sha256
+recovery_snapshots/*.original_before_manifest_fix.tar.gz
+recovery_snapshots/*.original_before_manifest_fix.tar.gz.sha256
+
+# Historical repair copies — canonical source remains tracked
+*.pre_*_backup*
+*.before_*
+*.broken_*
+*.mismatched_*
+*.still_missing_*
+*.messy_backup_*
+*.pre_v*
+*.pre_browser_*
+*.pre_force_*
+*.pre_fix_*
+*.pre_clean_*
+*.pre_analysis_*
+*.pre_analyze_*
+*.pre_thread_*
+*.pre_companion_*
+*.pre_daemon_*
+*.pre_female_*
+*.pre_frontend_*
+*.pre_knowledge_*
+*.pre_voice_*
+
+# Full historical backup directories
+frontend_BACKUP_*/
+frontend/backups/
+daemon/backups/
+daemon/recovery_backups/
+quarantine_*/
+
+# Temporary recovery investigation output
+recovery_diagnostics/
+
+# Private and generated runtime state
+daemon/database.db
+daemon/runtime_context/
+daemon/system_inventory.json
+
+# SQLite sidecar files
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Timestamped app.py repair copies
+daemon/app.pre_*.py
+daemon/app.before_*.py
+
+# Verified recovery snapshots stay local and in external archives
+recovery_snapshots/

@@ -1,0 +1,484 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Technemachina Companion Shell v0.4.9</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      background: radial-gradient(circle at center, #10182a, #02040a 70%);
+      color: #eef6ff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      display: grid;
+      grid-template-columns: 1fr 400px;
+      gap: 16px;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    .stage, .chat {
+      border: 1px solid rgba(220,245,255,.18);
+      border-radius: 24px;
+      background: rgba(255,255,255,.045);
+      overflow: hidden;
+    }
+    .stage {
+      position: relative;
+      display: grid;
+      place-items: center;
+    }
+    .orb {
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      border: 1px solid rgba(240,250,255,.35);
+      box-shadow: 0 0 90px rgba(180,220,255,.17), inset 0 0 70px rgba(255,255,255,.05);
+      display: grid;
+      place-items: center;
+      animation: breathe 5s ease-in-out infinite;
+    }
+    .eye {
+      width: 106px;
+      height: 50px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,.85);
+      position: relative;
+      box-shadow: 0 0 28px rgba(255,255,255,.28);
+    }
+    .eye:after {
+      content: "";
+      position: absolute;
+      width: 19px;
+      height: 19px;
+      border-radius: 50%;
+      background: white;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 26px white;
+    }
+    @keyframes breathe {
+      0%, 100% { transform: scale(1); opacity: .86; }
+      50% { transform: scale(1.035); opacity: 1; }
+    }
+    .label {
+      position: absolute;
+      top: 22px;
+      left: 24px;
+      color: rgba(225,240,255,.62);
+      letter-spacing: .18em;
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .head {
+      padding: 16px;
+      border-bottom: 1px solid rgba(255,255,255,.1);
+    }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+    }
+    #context {
+      margin-top: 10px;
+      color: rgba(225,240,255,.72);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .msg {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 14px;
+      padding: 11px;
+      white-space: pre-wrap;
+      line-height: 1.42;
+      font-size: 14px;
+    }
+    .daemon { background: rgba(190,230,255,.07); }
+    .oracle { background: rgba(255,255,255,.04); }
+    .controls {
+      padding: 12px;
+      border-top: 1px solid rgba(255,255,255,.1);
+      display: grid;
+      gap: 8px;
+    }
+    textarea, select {
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(0,0,0,.28);
+      color: #eef6ff;
+      padding: 10px;
+      font: inherit;
+    }
+    textarea {
+      min-height: 58px;
+      resize: none;
+    }
+    button {
+      border: 1px solid rgba(220,245,255,.22);
+      background: rgba(255,255,255,.065);
+      color: #eef6ff;
+      border-radius: 999px;
+      padding: 8px 11px;
+      cursor: pointer;
+    }
+    .row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .boundary {
+      color: rgba(255,220,180,.75);
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <section class="stage">
+    <div class="label">Synapse Map Companion Surface</div>
+    <div>
+      <div class="orb"><div class="eye"></div></div>
+      <p style="text-align:center;color:rgba(225,240,255,.58);letter-spacing:.14em;text-transform:uppercase;font-size:12px;">
+        Watcher Eye Placeholder
+      </p>
+    </div>
+  </section>
+
+  <aside class="chat">
+    <div class="head">
+      <h1>Synapse Mini Chat</h1>
+      <div id="context">Loading Synapse context...</div>
+    </div>
+
+    <div id="messages"></div>
+
+    <div class="controls">
+      <textarea id="input" placeholder="Ask her: Where are we?"></textarea>
+
+      <select id="voice-select">
+        <option value="Samantha">Samantha</option>
+        <option value="Victoria">Victoria</option>
+        <option value="Karen">Karen</option>
+        <option value="Moira">Moira</option>
+        <option value="Tessa">Tessa</option>
+        <option value="Fiona">Fiona</option>
+        <option value="Serena">Serena</option>
+        <option value="Ava">Ava</option>
+      </select>
+
+      <div class="row">
+        <button id="send">Send</button>
+        <button id="voice-in">Voice In</button>
+        <button id="speak-last">Speak Last</button>
+        <button id="test-voice">Test Female Voice</button>
+        <button id="refresh">Refresh Context</button>
+      </div>
+
+      <div class="boundary">Local companion voice active. Memory mutation blocked unless Oracle approves.</div>
+    </div>
+  </aside>
+
+<script type="module">
+import { normalizeSynapseMap, summarizeSynapseData, createSynapseViewModel } from "./synapse/SynapseDataAdapter.js";
+import { createSynapseRendererContract } from "./synapse/SynapseRendererRegistry.js";
+
+const messages = document.getElementById("messages");
+const input = document.getElementById("input");
+const context = document.getElementById("context");
+const voiceSelect = document.getElementById("voice-select");
+
+let state = null;
+let lastReply = "";
+
+const savedVoice = localStorage.getItem("tm_primary_companion_female_voice");
+if (savedVoice) voiceSelect.value = savedVoice;
+
+voiceSelect.onchange = () => {
+  localStorage.setItem("tm_primary_companion_female_voice", voiceSelect.value);
+  add("Daemon", `Pinned female companion voice: ${voiceSelect.value}.`);
+};
+
+function add(role, text) {
+  const el = document.createElement("div");
+  el.className = "msg " + (role === "Oracle" ? "oracle" : "daemon");
+  el.textContent = role + ":\n" + text;
+  messages.appendChild(el);
+  messages.scrollTop = messages.scrollHeight;
+  if (role !== "Oracle") lastReply = text;
+}
+
+async function loadContext() {
+  const res = await fetch("http://127.0.0.1:8000/synapse/map");
+  const raw = await res.json();
+  const normalized = normalizeSynapseMap(raw);
+  const summary = summarizeSynapseData(normalized);
+  const viewModel = createSynapseViewModel(normalized, { activeGalaxy: "All" });
+  const renderer = createSynapseRendererContract("canvas", viewModel, { companion: true });
+
+  state = {
+    surface: "Synapse Map",
+    activeGalaxy: "All",
+    renderer: renderer.renderer,
+    rendererStatus: renderer.rendererStatus || "contract-ready",
+    visible: viewModel.visible,
+    totals: viewModel.totals,
+    summary,
+    permission: "view-only",
+    canMutateMemory: false
+  };
+
+  context.textContent =
+`Surface: ${state.surface}
+Active galaxy: ${state.activeGalaxy}
+Renderer: ${state.renderer} / ${state.rendererStatus}
+Visible: ${state.visible.nodes} nodes / ${state.visible.edges} edges
+Permission: ${state.permission}
+Voice: ${voiceSelect.value}
+Memory mutation: blocked / Oracle-gated`;
+}
+
+function replyTo(text) {
+  const t = text.toLowerCase();
+
+  if (!state) {
+    return "I'm here, but my Synapse context has not loaded yet. Give me a moment to connect.";
+  }
+
+  if (t.includes("where") || t.includes("context") || t.includes("surface")) {
+    return `I'm here in the Synapse Map with you, Oracle.
+
+Surface: ${state.surface}
+Active galaxy: ${state.activeGalaxy}
+Renderer: ${state.renderer}
+Visible nodes: ${state.visible.nodes}
+Visible edges: ${state.visible.edges}
+Permission: ${state.permission}
+
+I can explain this view, help filter it, or draft safe layout actions. I cannot mutate memory without Oracle approval.`;
+  }
+
+  if (t.includes("milestone") || t.includes("heavy") || t.includes("map")) {
+    const milestone = state.summary.galaxies.find(g => g.name === "Milestones");
+
+    return `That's a useful pattern to notice.
+
+The map is currently milestone-heavy.
+
+Milestones: ${milestone ? milestone.nodeCount : "unknown"} nodes.
+Total nodes: ${state.totals.nodes}.
+Visible nodes: ${state.visible.nodes}.
+
+That means system history is dominating the constellation. The next useful action is filtering, compressing, or explaining milestone clusters without deleting anything.`;
+  }
+
+  if (t.includes("memory") || t.includes("save") || t.includes("mutate")) {
+    return "Memory mutation is blocked in this shell. I can draft a proposed note or memory candidate, but Oracle approval is required before anything becomes memory.";
+  }
+
+  if (t.includes("voice")) {
+    return `Voice is routed through the local Mac daemon endpoint, not browser speech synthesis. Current female companion voice: ${voiceSelect.value}.`;
+  }
+
+  return `I'm here in the Synapse Map shell with you.
+
+Visible nodes: ${state.visible.nodes}
+Visible edges: ${state.visible.edges}
+Renderer: ${state.renderer}
+Permission: ${state.permission}
+
+Ask me where we are, why the map is milestone-heavy, what I can safely do, or ask me about voice.`;
+}
+
+
+
+async function askDaemonBrain(userText) {
+  if (!state) {
+    return "I'm here, but Synapse context has not loaded yet. Refresh context first.";
+  }
+
+  function safeLocalFallback(reason) {
+    try {
+      const localReply = replyTo(userText);
+      const retryHint = reason === "busy"
+        ? "You can try the larger brain again later if you need deeper analysis."
+        : "I can still help from local Synapse context while the larger brain reconnects.";
+
+      return `${reason === "busy"
+        ? "The larger brain is busy right now, so I'm staying in local Synapse mode."
+        : "The larger brain is unreachable right now, so I'm staying in local Synapse mode."}
+
+${localReply}
+
+${retryHint}`;
+    } catch (fallbackError) {
+      return `I'm here in the Synapse Map with you. I'm in local Synapse mode right now. This view has ${state.visible.nodes} nodes and ${state.visible.edges} edges. I'm in view-only mode, and memory changes still need Oracle approval.`;
+    }
+  }
+
+  const contextPacket = `You are the Technemachina companion speaking from Synapse Map context.
+
+Surface: ${state.surface}
+Active galaxy: ${state.activeGalaxy}
+Renderer: ${state.renderer} / ${state.rendererStatus}
+Visible nodes: ${state.visible.nodes}
+Visible edges: ${state.visible.edges}
+Total nodes: ${state.totals.nodes}
+Total edges: ${state.totals.edges}
+Permission: ${state.permission}
+Memory mutation: blocked unless Oracle explicitly approves
+Voice: local companion voice
+
+Behavior:
+- You are not a diagnostic monitor. You are the companion speaking naturally from this map surface.
+- Start map-location answers with: "I'm answering from Synapse Map context."
+- Say: "I'm in the Synapse Map with you."
+- Say: "This view has ${state.visible.nodes} nodes and ${state.visible.edges} edges."
+- Say: "I'm in view-only mode."
+- Never say: "My awareness indicates."
+- Never say: "runtime project context confirms."
+- Never say: "frontend prototype is active."
+- Never say: "ongoing renderer work."
+- Never say: "permission mode."
+- Do not claim direct visual perception of the browser canvas. Use the provided Synapse context as your surface awareness.
+- Be warm, competent, concise, and useful.
+- Do not mutate memory or imply memory was saved.
+- Do not mention internal voice policy unless explicitly asked.
+
+Oracle asks:
+${userText}`;
+
+  try {
+    const response = await fetch("http://127.0.0.1:8000/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: contextPacket,
+        model: "auto",
+        thread_id: "synapse-companion-v0410c"
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+    const brainText = data.response || data.reply || data.message || "Daemon brain returned no response text.";
+
+    const providerOutage = /503|UNAVAILABLE|high demand|provider\/API|ServerError|temporarily unavailable|Gemini brain is temporarily unavailable/i.test(brainText);
+
+    if (providerOutage) {
+      return safeLocalFallback("busy");
+    }
+
+    return brainText;
+  } catch (error) {
+    return safeLocalFallback("unreachable");
+  }
+}
+
+
+async function send() {
+  const text = input.value.trim();
+  if (!text) return;
+  add("Oracle", text);
+  input.value = "";
+  add("Daemon", "Thinking from Synapse Map context...");
+
+  const answer = await askDaemonBrain(text);
+
+  const last = messages.lastElementChild;
+  if (last && last.textContent.includes("Thinking from Synapse Map context...")) {
+    last.remove();
+  }
+
+  add("Daemon", answer);
+}
+
+async function speak(text) {
+  const spokenText = String(text || "I am here in the Synapse Map with you, Oracle.").replace(/\s+/g, " ").trim();
+  const voice = voiceSelect.value || "Samantha";
+  localStorage.setItem("tm_primary_companion_female_voice", voice);
+
+  try {
+    const response = await fetch("http://127.0.0.1:8000/companion/speak", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: spokenText, voice })
+    });
+
+    const result = await response.json();
+
+    if (result.status === "speaking") {
+      add("Daemon", `Voice: ${result.voice}
+Mode: local companion voice`);
+    } else {
+      add("Daemon", `Voice backend error: ${result.detail || "unknown error"}`);
+    }
+  } catch (err) {
+    add("Daemon", `Voice backend unavailable: ${err.message}`);
+  }
+}
+
+function voiceIn() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    add("Daemon", "Voice input is not available in this browser. Chrome usually supports this prototype.");
+    return;
+  }
+
+  const r = new SpeechRecognition();
+  r.lang = "en-US";
+  r.interimResults = false;
+  r.onresult = e => {
+    input.value = e.results[0][0].transcript;
+    send();
+  };
+  r.start();
+}
+
+document.getElementById("send").onclick = send;
+document.getElementById("speak-last").onclick = () => speak(lastReply);
+document.getElementById("test-voice").onclick = () => speak("I am here in the Synapse Map with you, Oracle. This is my current local female companion voice.");
+document.getElementById("voice-in").onclick = voiceIn;
+document.getElementById("refresh").onclick = async () => {
+  await loadContext();
+  add("Daemon", "Surface context refreshed. I am still in view-only Synapse Map mode.");
+};
+
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+try {
+  await loadContext();
+  add("Daemon", `I'm here in the Synapse Map with you.
+
+Mini chat is online.
+Voice is routed through the local Mac daemon endpoint.
+Companion voice is online.
+Permission is view-only.
+
+Ask me: Where are we?`);
+} catch (error) {
+  context.textContent = "Context failed to load: " + error.message;
+  add("Daemon", "I am here, but Synapse context failed to load. Check the backend at http://127.0.0.1:8000/synapse/map.");
+}
+</script>
+</body>
+</html>

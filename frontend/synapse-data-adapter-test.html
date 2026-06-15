@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Technemachina Synapse Data Adapter Test</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      background: #05070c;
+      color: rgba(245, 247, 255, 0.92);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    .card {
+      max-width: 860px;
+      border: 1px solid rgba(170, 220, 255, 0.16);
+      border-radius: 18px;
+      padding: 18px;
+      background: rgba(255, 255, 255, 0.035);
+      box-shadow: 0 0 40px rgba(80, 150, 255, 0.06);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 22px;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 14px 0 18px;
+    }
+
+    .filters button {
+      border: 1px solid rgba(170, 220, 255, 0.22);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.045);
+      color: rgba(245, 247, 255, 0.9);
+      cursor: pointer;
+    }
+
+    .filters button.active {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(220, 245, 255, 0.48);
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 14px;
+      border-radius: 14px;
+      background: rgba(0, 0, 0, 0.32);
+      border: 1px solid rgba(255,255,255,0.08);
+      line-height: 1.45;
+    }
+
+    .ok { color: #b8ffd9; }
+    .warn { color: #ffdca8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Synapse Data Adapter Test</h1>
+    <p>This page tests the v0.4.1 data adapter against the live <code>/synapse/map</code> endpoint.</p>
+
+    <div id="filters" class="filters">
+      <button data-galaxy="All">All</button>
+    </div>
+
+    <div class="filters">
+      <button data-renderer="canvas" class="active">Use Canvas Contract</button>
+      <button data-renderer="three">Use Three Planned Contract</button>
+    </div>
+
+    <pre id="output">Loading...</pre>
+  </div>
+
+  <script type="module">
+    import { normalizeSynapseMap, summarizeSynapseData, createSynapseViewModel } from "./synapse/SynapseDataAdapter.js";
+    import { createSynapseRendererContract, listSynapseRenderers } from "./synapse/SynapseRendererRegistry.js";
+    import { createSynapseRendererState, publishSynapseRendererState } from "./synapse/SynapseRendererState.js";
+
+    const output = document.getElementById("output");
+    const filters = document.getElementById("filters");
+
+    let normalized = null;
+    let activeGalaxy = "All";
+    let activeRenderer = "canvas";
+
+    function setActiveButton() {
+      for (const button of filters.querySelectorAll("button")) {
+        button.classList.toggle("active", button.dataset.galaxy === activeGalaxy);
+      }
+    }
+
+    function render() {
+      if (!normalized) return;
+
+      const viewModel = createSynapseViewModel(normalized, { activeGalaxy });
+      const rendererContract = createSynapseRendererContract(activeRenderer, viewModel, { testPage: true });
+      const availableRenderers = listSynapseRenderers();
+      const rendererState = publishSynapseRendererState(createSynapseRendererState({
+        activeGalaxy,
+        activeRenderer,
+        availableRenderers,
+        viewModel,
+        rendererContract
+      }));
+      const summary = summarizeSynapseData(normalized);
+      const visibleNodes = viewModel.visibleNodes;
+      const visibleEdges = viewModel.visibleEdges;
+
+      output.innerHTML =
+`<span class="ok">SUCCESS</span>
+
+Adapter: SynapseDataAdapter.js
+Endpoint: /synapse/map
+
+Version: ${normalized.version}
+Generated At: ${normalized.generatedAt || "unknown"}
+
+Total Node Count: ${summary.nodeCount}
+Total Edge Count: ${summary.edgeCount}
+Galaxy Count: ${summary.galaxyCount}
+Galaxy Source: ${summary.galaxySource}
+
+Active Filter: ${activeGalaxy}
+Active Renderer: ${activeRenderer}
+Visible Nodes: ${visibleNodes.length}
+Visible Edges: ${visibleEdges.length}
+
+View Model:
+${JSON.stringify({
+  activeGalaxy: viewModel.activeGalaxy,
+  totals: viewModel.totals,
+  visible: viewModel.visible,
+  galaxySource: viewModel.galaxySource
+}, null, 2)}
+
+Galaxy Breakdown:
+${summary.galaxies.map((galaxy) => `- ${galaxy.name}: ${galaxy.nodeCount} nodes / ${galaxy.typeCount} types`).join("\n")}
+
+Available Renderers:
+${availableRenderers.map((renderer) => `- ${renderer.key}: ${renderer.name} / ${renderer.status}`).join("\n")}
+
+Renderer Contract:
+${JSON.stringify(rendererContract, null, 2)}
+
+Renderer State Capsule:
+${JSON.stringify({
+  stateVersion: rendererState.stateVersion,
+  activeGalaxy: rendererState.activeGalaxy,
+  activeRenderer: rendererState.activeRenderer,
+  visible: rendererState.viewModel.visible,
+  renderer: rendererState.rendererContract.renderer,
+  rendererStatus: rendererState.rendererContract.rendererStatus,
+  readOnly: rendererState.boundary.readOnly,
+  memoryMutation: rendererState.boundary.memoryMutation
+}, null, 2)}
+
+Renderer Status:
+- Canvas renderer remains active in main prototype.
+- Data adapter can now normalize live Synapse data.
+- Data adapter can now filter visible nodes by derived galaxy.
+- Data adapter now emits a renderer-ready view model.
+- Canvas renderer skeleton now accepts the view model contract.
+- Three.js renderer remains planned for v0.5.x.
+
+Sample Visible Node:
+${JSON.stringify(visibleNodes[0] || null, null, 2)}
+
+Sample Visible Edge:
+${JSON.stringify(visibleEdges[0] || null, null, 2)}
+`;
+    }
+
+    function installFilters(summary) {
+      const galaxyNames = summary.galaxies.map((galaxy) => galaxy.name);
+
+      for (const name of galaxyNames) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.dataset.galaxy = name;
+        button.textContent = name;
+        filters.appendChild(button);
+      }
+
+      document.addEventListener("click", (event) => {
+        const galaxyButton = event.target.closest("button[data-galaxy]");
+        if (galaxyButton) {
+          activeGalaxy = galaxyButton.dataset.galaxy;
+          setActiveButton();
+          render();
+          return;
+        }
+
+        const rendererButton = event.target.closest("button[data-renderer]");
+        if (rendererButton) {
+          activeRenderer = rendererButton.dataset.renderer;
+
+          for (const button of document.querySelectorAll("button[data-renderer]")) {
+            button.classList.toggle("active", button.dataset.renderer === activeRenderer);
+          }
+
+          render();
+        }
+      });
+
+      setActiveButton();
+    }
+
+    async function run() {
+      try {
+        const response = await fetch("http://127.0.0.1:8000/synapse/map");
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const raw = await response.json();
+        normalized = normalizeSynapseMap(raw);
+        const summary = summarizeSynapseData(normalized);
+
+        installFilters(summary);
+        render();
+      } catch (error) {
+        output.innerHTML =
+`<span class="warn">ERROR</span>
+
+Could not load /synapse/map.
+
+Detail:
+${error.message}
+`;
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

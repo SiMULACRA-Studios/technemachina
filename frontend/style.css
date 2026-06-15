@@ -1,0 +1,2748 @@
+body {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: #050505;
+    color: #d7d7d7;
+}
+
+#container {
+    display: flex;
+    height: 100vh;
+}
+
+#menu {
+    width: 300px;
+    background: linear-gradient(180deg, #101010, #070707);
+    padding: 22px;
+    border-right: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+h2 {
+    margin: 0;
+    letter-spacing: 2px;
+    color: #f1f1f1;
+}
+
+.sub {
+    margin-top: -6px;
+    color: #8a8a8a;
+    font-size: 12px;
+}
+
+#workspace {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+#terminal-out {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+}
+
+#input-tray {
+    padding: 16px;
+    border-top: 1px solid #333;
+    background: #0e0e0e;
+}
+
+#cmd-in {
+    width: 100%;
+    height: 130px;
+    box-sizing: border-box;
+    resize: vertical;
+}
+
+textarea, input, select, button {
+    background: #161616;
+    border: 1px solid #333;
+    color: #e0e0e0;
+    padding: 10px;
+    border-radius: 6px;
+    font-family: inherit;
+}
+
+button {
+    cursor: pointer;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+button:hover {
+    background: #222;
+    border-color: #777;
+}
+
+hr {
+    width: 100%;
+    border: 0;
+    border-top: 1px solid #333;
+}
+
+/* v0.2.3 Provider Brain Lights */
+#brain-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.provider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #d7d7d7;
+}
+
+.provider-light {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 6px currentColor;
+}
+
+.provider-light.green {
+    background: #00ff66;
+    color: #00ff66;
+}
+
+.provider-light.red {
+    background: #ff2b2b;
+    color: #ff2b2b;
+}
+
+
+/* --- Technemachina Code Readability UI v0.2.6a --- */
+
+.message,
+.chat-message,
+.assistant,
+.user {
+  line-height: 1.55;
+}
+
+.message-text {
+  margin: 0.35rem 0;
+}
+
+.code-card {
+  margin: 14px 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #090b10;
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.35);
+}
+
+.code-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: #141821;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.code-lang {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.78;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.copy-code-btn {
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  padding: 5px 10px;
+  background: #202636;
+  color: #f4f7ff;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.copy-code-btn:hover {
+  background: #2c3448;
+}
+
+.code-card pre {
+  margin: 0;
+  padding: 16px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.code-card code {
+  color: #f1f5ff;
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+/* soft visual separation for code-heavy replies */
+.assistant .code-card,
+.message.assistant .code-card,
+.chat-message.assistant .code-card {
+  border-color: rgba(130, 170, 255, 0.28);
+}
+
+/* --- End Technemachina Code Readability UI --- */
+
+/* --- Technemachina Chat Message Layout v0.2.6a --- */
+
+.chat-row {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.035);
+  white-space: normal;
+}
+
+.chat-row.user {
+  border-color: rgba(255,255,255,0.16);
+}
+
+.chat-row.daemon {
+  border-color: rgba(130,170,255,0.28);
+  background: rgba(80,110,180,0.08);
+}
+
+.chat-row.error {
+  border-color: rgba(255,90,90,0.35);
+}
+
+.chat-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  opacity: 0.72;
+  margin-bottom: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.chat-body {
+  line-height: 1.55;
+}
+
+/* --- End Technemachina Chat Message Layout --- */
+
+/* --- Code Card Header Cleanup v0.2.6a --- */
+
+.code-card-header {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.copy-code-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: auto !important;
+  min-width: 64px !important;
+  height: 28px !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  text-transform: none !important;
+}
+
+.code-lang {
+  display: inline-block !important;
+  white-space: nowrap !important;
+}
+
+/* --- End Code Card Header Cleanup --- */
+
+/* --- Lightweight Syntax Colors v0.2.6a --- */
+
+.tok-keyword {
+  color: #ff79c6;
+  font-weight: 700;
+}
+
+.tok-string {
+  color: #f1fa8c;
+}
+
+.tok-comment {
+  color: #7f8c98;
+  font-style: italic;
+}
+
+.tok-number {
+  color: #bd93f9;
+}
+
+.code-content {
+  color: #f8f8f2;
+}
+
+/* --- End Lightweight Syntax Colors --- */
+
+/* --- Technemachina Syntax Colors v0.2.6a --- */
+
+.code-content {
+  color: #f8f8f2 !important;
+}
+
+.tok-keyword {
+  color: #ff79c6 !important;
+  font-weight: 700 !important;
+}
+
+.tok-function {
+  color: #8be9fd !important;
+  font-weight: 700 !important;
+}
+
+.tok-string {
+  color: #f1fa8c !important;
+}
+
+.tok-comment {
+  color: #6272a4 !important;
+  font-style: italic !important;
+}
+
+.tok-number {
+  color: #bd93f9 !important;
+}
+
+/* --- End Technemachina Syntax Colors --- */
+
+
+/* --- Technemachina Thread Sidebar UI v0.2.6c-2 --- */
+
+#thread-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thread-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.thread-panel-header h3 {
+  margin: 0;
+}
+
+#new-thread-btn {
+  width: 34px;
+  height: 32px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+#active-thread-label {
+  font-size: 11px;
+  color: #9ca3af;
+  padding: 7px 8px;
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.035);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.thread-item {
+  width: 100%;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 10px;
+  border-radius: 10px;
+  background: #111;
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.thread-item:hover {
+  background: #191919;
+  border-color: rgba(255,255,255,0.25);
+}
+
+.thread-item.active {
+  border-color: rgba(130,170,255,0.55);
+  background: rgba(80,110,180,0.16);
+  box-shadow: 0 0 14px rgba(80,110,180,0.12);
+}
+
+.thread-title {
+  font-size: 12px;
+  color: #f1f1f1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-preview {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #9ca3af;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.thread-meta {
+  margin-top: 5px;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.thread-empty {
+  font-size: 12px;
+  color: #777;
+  padding: 8px;
+}
+
+/* --- End Technemachina Thread Sidebar UI --- */
+
+
+/* --- Technemachina Layout Refinement v0.2.6c-2b --- */
+
+#menu {
+  overflow-y: auto;
+}
+
+#tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#tool-panel h3 {
+  margin: 0 0 4px 0;
+}
+
+#input-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#input-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+#send-query-btn {
+  min-width: 140px;
+  background: #202636;
+  border-color: rgba(130,170,255,0.35);
+}
+
+#send-query-btn:hover {
+  background: #2c3448;
+  border-color: rgba(130,170,255,0.7);
+}
+
+#cmd-in {
+  min-height: 115px;
+}
+
+#brain-panel {
+  margin-top: 2px;
+}
+
+/* --- End Technemachina Layout Refinement --- */
+
+/* --- Technemachina Thread Management Controls v0.2.6c-3 --- */
+
+.thread-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.thread-topline .thread-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-controls {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.thread-item:hover .thread-controls,
+.thread-item.active .thread-controls {
+  opacity: 1;
+}
+
+.thread-control-btn {
+  width: 23px;
+  height: 23px;
+  padding: 0 !important;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1;
+  text-align: center;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  background: rgba(255,255,255,0.06);
+  color: #d7d7d7;
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+.thread-control-btn:hover {
+  background: rgba(130,170,255,0.18);
+  border-color: rgba(130,170,255,0.55);
+}
+
+.thread-control-btn.archive:hover {
+  background: rgba(255,80,80,0.14);
+  border-color: rgba(255,80,80,0.45);
+}
+
+/* --- End Technemachina Thread Management Controls --- */
+
+/* --- Thread Edit/Delete Visibility Fix v0.2.6c-3b --- */
+
+.thread-topline {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+}
+
+.thread-topline .thread-title {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+.thread-controls {
+  display: inline-flex !important;
+  gap: 5px !important;
+  flex-shrink: 0 !important;
+  opacity: 1 !important;
+}
+
+.thread-control-btn {
+  width: auto !important;
+  min-width: 34px !important;
+  height: 24px !important;
+  padding: 2px 6px !important;
+  border-radius: 6px !important;
+  font-size: 10px !important;
+  line-height: 1 !important;
+  text-align: center !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+  background: rgba(255,255,255,0.12) !important;
+  color: #f1f1f1 !important;
+  border: 1px solid rgba(255,255,255,0.25) !important;
+}
+
+.thread-control-btn.rename:hover {
+  background: rgba(130,170,255,0.22) !important;
+  border-color: rgba(130,170,255,0.75) !important;
+}
+
+.thread-control-btn.archive:hover {
+  background: rgba(255,80,80,0.22) !important;
+  border-color: rgba(255,80,80,0.75) !important;
+}
+
+/* --- End Thread Edit/Delete Visibility Fix --- */
+
+/* --- Technemachina Dynamic Version UI v0.2.6d --- */
+
+.sub.small {
+  margin-top: -8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: #6f7885;
+  max-width: 250px;
+}
+
+/* --- End Technemachina Dynamic Version UI --- */
+
+
+/* --- Technemachina Read-Only Memory UI Panel v0.2.7d --- */
+
+#memory-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.memory-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.memory-panel-header h3,
+#memory-panel h4 {
+  margin: 0;
+}
+
+#refresh-memory-btn,
+#memory-search-btn {
+  padding: 5px 8px;
+  font-size: 10px;
+}
+
+.memory-section,
+.memory-list {
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.memory-search-row {
+  display: flex;
+  gap: 6px;
+}
+
+#memory-search-input {
+  min-width: 0;
+  flex: 1;
+  font-size: 11px;
+  padding: 7px;
+}
+
+.memory-summary-line {
+  color: #e5e7eb;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.memory-layer-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  color: #9ca3af;
+}
+
+.memory-record-item,
+.memory-review-item,
+#memory-search-results {
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.24);
+  border: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 7px;
+}
+
+.memory-record-title {
+  font-size: 12px;
+  color: #f3f4f6;
+  font-weight: 600;
+  margin-bottom: 5px;
+}
+
+.memory-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+
+.memory-badge {
+  display: inline-block;
+  padding: 2px 5px;
+  border-radius: 999px;
+  font-size: 9px;
+  color: #dbeafe;
+  background: rgba(96,165,250,0.13);
+  border: 1px solid rgba(96,165,250,0.22);
+}
+
+.memory-record-summary {
+  font-size: 11px;
+  color: #aab2c0;
+  line-height: 1.35;
+}
+
+.memory-record-source {
+  margin-top: 5px;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+/* --- End Technemachina Read-Only Memory UI Panel --- */
+
+
+/* --- Technemachina Control Center Shell v0.2.7d --- */
+
+#mode-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 0 14px 0;
+}
+
+.mode-btn {
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-size: 11px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.13);
+  color: #cbd5e1;
+}
+
+.mode-btn.active {
+  color: #f8fafc;
+  background: rgba(96,165,250,0.18);
+  border-color: rgba(96,165,250,0.45);
+  box-shadow: 0 0 18px rgba(96,165,250,0.12);
+}
+
+.mode-page {
+  display: none;
+  min-height: 0;
+}
+
+.mode-page.active {
+  display: block;
+}
+
+#chat-page.active {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+#control-center-page {
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.control-center-header {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.control-center-header h2 {
+  margin: 0 0 4px 0;
+}
+
+.control-center-header p {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+#control-center-page #memory-panel {
+  max-width: 980px;
+  margin-top: 0;
+}
+
+#brain-page {
+  height: 100%;
+}
+
+.brain-placeholder {
+  min-height: 65vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at center, rgba(80,110,180,0.20), rgba(0,0,0,0.18) 36%, rgba(0,0,0,0.42) 70%),
+    linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+  border: 1px solid rgba(255,255,255,0.10);
+  text-align: center;
+}
+
+.brain-placeholder h2 {
+  margin: 0;
+}
+
+.brain-placeholder p {
+  max-width: 560px;
+  margin: 0;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.brain-orb {
+  width: 210px;
+  height: 210px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #dbeafe;
+  letter-spacing: 0.14em;
+  font-size: 12px;
+  line-height: 1.45;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255,255,255,0.20), transparent 20%),
+    radial-gradient(circle at center, rgba(17,24,39,0.95), rgba(0,0,0,0.95) 65%);
+  border: 1px solid rgba(147,197,253,0.24);
+  box-shadow:
+    inset 0 0 28px rgba(147,197,253,0.08),
+    0 0 60px rgba(59,130,246,0.10);
+}
+
+/* --- End Technemachina Control Center Shell --- */
+
+
+/* --- Technemachina Control Center Read-Only Memory Polish v0.2.7d-1 --- */
+
+.memory-health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.memory-health-card {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(15,23,42,0.46);
+  border: 1px solid rgba(148,163,184,0.14);
+}
+
+.memory-health-value {
+  font-size: 21px;
+  color: #f8fafc;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.memory-health-label {
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.memory-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+  gap: 12px;
+}
+
+.memory-grid.wide {
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr) minmax(240px, 0.8fr);
+}
+
+.memory-card {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.memory-card h4 {
+  color: #e5e7eb;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 9px !important;
+}
+
+.memory-clickable {
+  width: 100%;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.memory-clickable:hover {
+  border-color: rgba(96,165,250,0.34);
+  background: rgba(30,41,59,0.42);
+}
+
+.memory-inspector-title {
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.memory-inspector-line {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+  margin-top: 7px;
+}
+
+.memory-explain-box {
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 10px;
+  color: #bfdbfe;
+  background: rgba(59,130,246,0.10);
+  border: 1px solid rgba(59,130,246,0.20);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1100px) {
+  .memory-health-strip,
+  .memory-grid,
+  .memory-grid.wide {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- End Technemachina Control Center Read-Only Memory Polish --- */
+
+
+/* --- Technemachina Review Queue Controls v0.2.7d-2 --- */
+
+.review-control-grid {
+  margin-top: 12px;
+}
+
+.review-action-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.review-action-row button {
+  font-size: 10px;
+  padding: 7px 10px;
+  border-radius: 999px;
+}
+
+.review-action-row button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.review-decision-item {
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 7px;
+}
+
+#review-inspector {
+  min-height: 170px;
+}
+
+#review-decision-log {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* --- End Technemachina Review Queue Controls --- */
+
+
+
+/* --- Technemachina Review Queue Real Buttons v0.2.7d-2b --- */
+
+.review-case-card {
+  cursor: pointer;
+  position: relative;
+}
+
+.review-case-card.selected {
+  border-color: rgba(96,165,250,0.55);
+  box-shadow: 0 0 18px rgba(96,165,250,0.12);
+}
+
+.review-case-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.review-real-button {
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 10px;
+  cursor: pointer;
+  border: 1px solid rgba(148,163,184,0.28);
+  background: rgba(15,23,42,0.85);
+  color: #e5e7eb;
+}
+
+.review-real-button:hover {
+  border-color: rgba(96,165,250,0.65);
+  background: rgba(30,41,59,0.95);
+}
+
+.review-select-button {
+  color: #bfdbfe;
+}
+
+.review-approve-button {
+  color: #bbf7d0;
+  border-color: rgba(34,197,94,0.35);
+}
+
+.review-reject-button {
+  color: #fecaca;
+  border-color: rgba(239,68,68,0.35);
+}
+
+.review-defer-button {
+  color: #fde68a;
+  border-color: rgba(245,158,11,0.35);
+}
+
+.review-closed-label {
+  font-size: 10px;
+  color: #94a3b8;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(148,163,184,0.08);
+  border: 1px solid rgba(148,163,184,0.14);
+}
+
+/* --- End Technemachina Review Queue Real Buttons --- */
+
+
+
+/* --- Technemachina Candidate Triage Desk v0.2.7e-1 --- */
+
+.candidate-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255,255,255,0.10);
+}
+
+.candidate-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.candidate-panel-header h3 {
+  margin: 0 0 5px 0;
+}
+
+.candidate-panel-header p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.candidate-action-cluster {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.candidate-action-cluster button,
+#enqueue-candidate-btn {
+  font-size: 10px;
+  padding: 7px 10px;
+  border-radius: 999px;
+}
+
+#enqueue-candidate-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.candidate-health-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.candidate-health-card {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(15,23,42,0.46);
+  border: 1px solid rgba(148,163,184,0.14);
+}
+
+.candidate-health-value {
+  font-size: 21px;
+  color: #f8fafc;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.candidate-health-label {
+  font-size: 10px;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.candidate-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr) minmax(240px, 0.8fr);
+  gap: 12px;
+}
+
+.candidate-card {
+  min-width: 0;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.candidate-card h4 {
+  color: #e5e7eb;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 9px 0;
+}
+
+.candidate-list-item {
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 7px;
+  cursor: pointer;
+}
+
+.candidate-list-item:hover,
+.candidate-list-item.selected {
+  border-color: rgba(96,165,250,0.50);
+  background: rgba(30,41,59,0.42);
+}
+
+.candidate-title {
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.candidate-line,
+.candidate-id-line {
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.4;
+  margin-top: 7px;
+}
+
+.candidate-id-line {
+  font-family: monospace;
+  color: #bfdbfe;
+}
+
+.candidate-explain-box,
+.candidate-excerpt {
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.candidate-explain-box {
+  color: #bfdbfe;
+  background: rgba(59,130,246,0.10);
+  border: 1px solid rgba(59,130,246,0.20);
+}
+
+.candidate-excerpt {
+  color: #d1d5db;
+  background: rgba(0,0,0,0.22);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+@media (max-width: 1200px) {
+  .candidate-health-strip,
+  .candidate-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .candidate-panel-header {
+    flex-direction: column;
+  }
+}
+
+/* --- End Technemachina Candidate Triage Desk --- */
+
+
+
+/* --- Technemachina Candidate UI Refinement v0.2.7e-1b --- */
+
+.candidate-disabled-action {
+  opacity: 0.35 !important;
+  cursor: not-allowed !important;
+  border-color: rgba(148,163,184,0.18) !important;
+  color: #94a3b8 !important;
+}
+
+.candidate-governed-box,
+.candidate-ready-box {
+  margin-top: 10px;
+  padding: 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.candidate-governed-box {
+  color: #cbd5e1;
+  background: rgba(148,163,184,0.09);
+  border: 1px solid rgba(148,163,184,0.18);
+}
+
+.candidate-ready-box {
+  color: #bbf7d0;
+  background: rgba(34,197,94,0.09);
+  border: 1px solid rgba(34,197,94,0.20);
+}
+
+/* --- End Technemachina Candidate UI Refinement --- */
+
+
+
+/* --- Technemachina Control Center Mini-Tabs Layout v0.2.8c-2 --- */
+
+.cc-mini-tabs-shell {
+  margin-top: 16px;
+}
+
+.cc-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(148,163,184,0.16);
+  border-radius: 14px;
+  background: rgba(15,23,42,0.62);
+  margin-bottom: 14px;
+}
+
+.cc-tab-btn {
+  border: 1px solid rgba(148,163,184,0.22);
+  background: rgba(15,23,42,0.75);
+  color: #cbd5e1;
+  border-radius: 999px;
+  padding: 8px 11px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.cc-tab-btn:hover {
+  border-color: rgba(96,165,250,0.45);
+  color: #e0f2fe;
+}
+
+.cc-tab-btn.active {
+  background: rgba(59,130,246,0.18);
+  border-color: rgba(96,165,250,0.72);
+  color: #bfdbfe;
+}
+
+.cc-tab-panel {
+  display: none;
+}
+
+.cc-tab-panel.active {
+  display: block;
+}
+
+.cc-panel-heading {
+  border: 1px solid rgba(148,163,184,0.14);
+  background: rgba(15,23,42,0.48);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.cc-panel-heading h3 {
+  margin: 0 0 5px;
+  font-size: 18px;
+}
+
+.cc-panel-heading p {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.cc-panel-heading button,
+.cc-jump-row button {
+  margin-top: 10px;
+  border: 1px solid rgba(148,163,184,0.24);
+  background: rgba(30,41,59,0.75);
+  color: #cbd5e1;
+  border-radius: 10px;
+  padding: 7px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cc-metric-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.cc-metric-card,
+.cc-loading-card,
+.cc-dashboard-card {
+  border: 1px solid rgba(148,163,184,0.14);
+  background: rgba(15,23,42,0.54);
+  border-radius: 14px;
+  padding: 13px;
+}
+
+.cc-metric-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.cc-metric-label {
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.cc-metric-hint {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.cc-overview-grid,
+.cc-split-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.cc-single-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.cc-dashboard-card h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.cc-dashboard-card p {
+  margin: 0;
+  color: #cbd5e1;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.cc-jump-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.cc-contained-panel {
+  margin-top: 0 !important;
+}
+
+.cc-mini-table {
+  display: grid;
+  gap: 8px;
+}
+
+.cc-mini-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  border: 1px solid rgba(148,163,184,0.12);
+  background: rgba(15,23,42,0.38);
+  border-radius: 10px;
+  padding: 9px;
+}
+
+.cc-mini-row strong {
+  color: #e2e8f0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cc-mini-row span {
+  color: #bfdbfe;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cc-mini-row small {
+  grid-column: 1 / -1;
+  color: #64748b;
+  font-size: 10px;
+}
+
+#cc-tab-reviews .memory-card,
+#cc-tab-decisions .memory-card,
+#cc-tab-memory .memory-card,
+#cc-tab-thread-candidates .candidate-panel {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .cc-metric-strip,
+  .cc-overview-grid,
+  .cc-split-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cc-tab-row {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .cc-tab-btn {
+    white-space: nowrap;
+  }
+}
+
+/* --- End Technemachina Control Center Mini-Tabs Layout --- */
+
+
+/* --- Technemachina Synapse Map Frontend / Constellation Renderer v0.2.9c --- */
+
+#synapse-map-page {
+  min-height: 100%;
+}
+
+.synapse-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: calc(100vh - 150px);
+}
+
+.synapse-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(160, 180, 255, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(120, 160, 255, 0.14), transparent 34%),
+    rgba(8, 10, 20, 0.72);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+}
+
+.synapse-header h2 {
+  margin: 4px 0 6px;
+  letter-spacing: 0.02em;
+}
+
+.synapse-subtitle {
+  margin: 0;
+  color: rgba(230, 235, 255, 0.68);
+  max-width: 760px;
+  line-height: 1.45;
+}
+
+.synapse-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.synapse-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.synapse-status-strip span {
+  border: 1px solid rgba(170, 190, 255, 0.16);
+  background: rgba(12, 15, 28, 0.78);
+  color: rgba(235, 240, 255, 0.82);
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.synapse-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  min-height: 560px;
+}
+
+.synapse-canvas-card {
+  position: relative;
+  min-height: 560px;
+  border: 1px solid rgba(150, 175, 255, 0.14);
+  border-radius: 22px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(40, 54, 92, 0.65), rgba(2, 4, 12, 1) 70%);
+  box-shadow:
+    inset 0 0 60px rgba(120, 160, 255, 0.05),
+    0 22px 70px rgba(0, 0, 0, 0.34);
+}
+
+#synapse-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+  display: block;
+  cursor: crosshair;
+}
+
+.synapse-inspector {
+  border: 1px solid rgba(160, 180, 255, 0.16);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(8, 10, 20, 0.76);
+  overflow: hidden;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.24);
+}
+
+.synapse-inspector h3 {
+  margin: 6px 0;
+}
+
+#synapse-inspector-subtitle {
+  margin: 0 0 12px;
+  color: rgba(230, 235, 255, 0.62);
+  line-height: 1.4;
+}
+
+#synapse-inspector-json {
+  max-height: 430px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(160, 180, 255, 0.12);
+  background: rgba(0, 0, 0, 0.34);
+  color: rgba(238, 242, 255, 0.86);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.synapse-tooltip.hidden {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .synapse-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .synapse-inspector {
+    min-height: 260px;
+  }
+}
+
+/* --- End Technemachina Synapse Map Frontend / Constellation Renderer --- */
+
+
+/* --- Technemachina Synapse Map Zoom + Black Starfield Patch v0.2.9c-2 --- */
+
+.synapse-canvas-card {
+  background: #000000 !important;
+}
+
+#synapse-canvas {
+  background: #000000 !important;
+}
+
+.synapse-zoom-controls {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid rgba(245, 247, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.68);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+}
+
+.synapse-zoom-btn,
+.synapse-zoom-reset-btn {
+  border: 1px solid rgba(245, 247, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.92);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.synapse-zoom-btn {
+  width: 34px;
+  height: 34px;
+  font-size: 20px;
+}
+
+.synapse-zoom-reset-btn {
+  min-width: 58px;
+  height: 34px;
+  padding: 0 10px;
+}
+
+.synapse-zoom-btn:hover,
+.synapse-zoom-reset-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* --- End Technemachina Synapse Map Zoom + Black Starfield Patch --- */
+
+
+/* --- Technemachina Synapse Map Galaxy Layout Engine v0.2.9d --- */
+
+#synapse-canvas {
+  cursor: grab !important;
+  background: #000000 !important;
+}
+
+#synapse-canvas.is-grabbing {
+  cursor: grabbing !important;
+}
+
+.synapse-canvas-card {
+  background: #000000 !important;
+}
+
+.synapse-status-strip span {
+  background: rgba(0, 0, 0, 0.72) !important;
+}
+
+/* --- End Technemachina Synapse Map Galaxy Layout Engine --- */
+
+
+/* --- Technemachina Synapse Map Safe Orbit Controls v0.2.9e-safe --- */
+
+.synapse-zoom-controls {
+  max-width: calc(100% - 28px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.synapse-zoom-reset-btn {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* --- End Technemachina Synapse Map Safe Orbit Controls --- */
+
+
+/* --- Technemachina Synapse Map Red Trace + Orbit Override Fix v0.2.9e-1 --- */
+
+#synapse-canvas {
+  cursor: grab !important;
+}
+
+#synapse-canvas.is-orbiting {
+  cursor: grabbing !important;
+}
+
+#synapse-canvas.is-grabbing {
+  cursor: grabbing !important;
+}
+
+/* --- End Technemachina Synapse Map Red Trace + Orbit Override Fix --- */
+
+
+/* --- Technemachina Layout Separation v0.2.9f --- */
+
+/* Chat cockpit: keep thread/sidebar visible and prevent the chat from hovering over it. */
+body.tm-chat-cockpit-mode .mode-page#chat-page.active {
+  position: relative !important;
+  z-index: 1 !important;
+  width: 100%;
+}
+
+/* Synapse command-center: hide the app sidebar/navigation spine only in Synapse mode. */
+body.tm-synapse-command-mode aside,
+body.tm-synapse-command-mode .sidebar,
+body.tm-synapse-command-mode .thread-sidebar,
+body.tm-synapse-command-mode .threads-sidebar,
+body.tm-synapse-command-mode .thread-panel {
+  display: none !important;
+}
+
+/* Let the main surface claim the viewport. */
+body.tm-synapse-command-mode main,
+body.tm-synapse-command-mode .main,
+body.tm-synapse-command-mode .main-panel,
+body.tm-synapse-command-mode .content,
+body.tm-synapse-command-mode .app-main {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+/* Make Synapse feel like the command center, not a card trapped in a dashboard. */
+body.tm-synapse-command-mode #synapse-map-page.active {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: calc(100vh - 24px) !important;
+  display: block !important;
+}
+
+body.tm-synapse-command-mode .synapse-shell {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: calc(100vh - 24px) !important;
+  margin: 0 auto !important;
+  padding: 18px 22px 22px !important;
+  box-sizing: border-box !important;
+}
+
+body.tm-synapse-command-mode .synapse-layout {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: calc(100vh - 190px) !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 320px !important;
+  gap: 18px !important;
+  align-items: stretch !important;
+}
+
+body.tm-synapse-command-mode .synapse-canvas-card {
+  width: 100% !important;
+  min-height: calc(100vh - 210px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+body.tm-synapse-command-mode #synapse-canvas {
+  width: 100% !important;
+  height: calc(100vh - 230px) !important;
+  min-height: 620px !important;
+  display: block !important;
+}
+
+/* Keep inspector visible, but make it secondary to the star field. */
+body.tm-synapse-command-mode .synapse-inspector {
+  max-height: calc(100vh - 210px) !important;
+  overflow: auto !important;
+}
+
+/* --- End Technemachina Layout Separation --- */
+
+
+/* --- Technemachina Synapse Center + Lower Readout v0.2.9g --- */
+
+/* Command mode should feel like a centered observatory, not a left-pushed dashboard. */
+body.tm-synapse-command-mode .synapse-layout {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: calc(100vh - 190px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 18px !important;
+}
+
+/* The star field gets the throne. */
+body.tm-synapse-command-mode .synapse-canvas-card {
+  width: min(100%, 1280px) !important;
+  max-width: 1280px !important;
+  min-height: calc(100vh - 310px) !important;
+  margin: 0 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* Keep the canvas large but visually centered. */
+body.tm-synapse-command-mode #synapse-canvas {
+  width: 100% !important;
+  height: calc(100vh - 330px) !important;
+  min-height: 560px !important;
+  display: block !important;
+  margin: 0 auto !important;
+}
+
+/* Move the selected-star information beneath the map as a signal readout. */
+body.tm-synapse-command-mode .synapse-inspector {
+  width: min(100%, 1280px) !important;
+  max-width: 1280px !important;
+  max-height: 230px !important;
+  margin: 0 auto !important;
+  overflow: auto !important;
+  box-sizing: border-box !important;
+}
+
+/* Make the readout feel intentional and secondary. */
+body.tm-synapse-command-mode .synapse-inspector h3 {
+  margin-top: 0 !important;
+}
+
+body.tm-synapse-command-mode #synapse-inspector-json {
+  max-height: 135px !important;
+  overflow: auto !important;
+}
+
+/* --- End Technemachina Synapse Center + Lower Readout --- */
+
+
+/* --- Synapse Map Center + Bottom Readout Fix v0.2.9g --- */
+
+body.tm-synapse-command-mode .synapse-layout {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  width: 100% !important;
+  gap: 18px !important;
+}
+
+body.tm-synapse-command-mode .synapse-canvas-card {
+  width: min(100%, 1320px) !important;
+  max-width: 1320px !important;
+  margin: 0 auto !important;
+}
+
+body.tm-synapse-command-mode #synapse-canvas {
+  width: 100% !important;
+  height: calc(100vh - 340px) !important;
+  min-height: 560px !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
+
+body.tm-synapse-command-mode .synapse-inspector {
+  width: min(100%, 1320px) !important;
+  max-width: 1320px !important;
+  margin: 0 auto !important;
+  max-height: 240px !important;
+  overflow: auto !important;
+}
+
+body.tm-synapse-command-mode .synapse-inspector::before {
+  content: "SELECTED SIGNAL";
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  opacity: 0.65;
+  margin-bottom: 8px;
+}
+
+body.tm-synapse-command-mode #synapse-inspector-json {
+  max-height: 130px !important;
+  overflow: auto !important;
+}
+
+/* --- End Synapse Map Center + Bottom Readout Fix --- */
+
+
+/* --- Technemachina Synapse Long Signal Description v0.2.9j --- */
+
+body.tm-synapse-command-mode #tm-long-signal-card {
+  width: min(100%, 1320px) !important;
+  max-width: 1320px !important;
+  margin: 0 auto 16px !important;
+  padding: 18px 20px 20px !important;
+  box-sizing: border-box !important;
+  border: 1px solid rgba(255,255,255,0.16) !important;
+  border-radius: 20px !important;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(255, 70, 70, 0.10), transparent 34%),
+    rgba(4, 7, 12, 0.84) !important;
+  backdrop-filter: blur(16px) !important;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.28) !important;
+}
+
+body.tm-synapse-command-mode .tm-long-signal-kicker {
+  font-size: 10px !important;
+  letter-spacing: 0.20em !important;
+  text-transform: uppercase !important;
+  opacity: 0.62 !important;
+  margin-bottom: 8px !important;
+}
+
+body.tm-synapse-command-mode #tm-long-signal-title {
+  margin: 0 0 6px !important;
+  font-size: 23px !important;
+  line-height: 1.15 !important;
+  font-weight: 650 !important;
+}
+
+body.tm-synapse-command-mode #tm-long-signal-meta {
+  margin: 0 0 12px !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  opacity: 0.68 !important;
+}
+
+body.tm-synapse-command-mode #tm-long-signal-description {
+  max-width: 980px !important;
+  margin: 0 !important;
+  font-size: 14px !important;
+  line-height: 1.58 !important;
+  opacity: 0.94 !important;
+  white-space: pre-wrap !important;
+}
+
+body.tm-synapse-command-mode #tm-long-signal-links {
+  margin-top: 14px !important;
+  padding-top: 12px !important;
+  border-top: 1px solid rgba(255,255,255,0.10) !important;
+}
+
+body.tm-synapse-command-mode #tm-long-signal-links span {
+  display: block !important;
+  margin-bottom: 5px !important;
+  font-size: 10px !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  opacity: 0.58 !important;
+}
+
+body.tm-synapse-command-mode #tm-long-signal-links p {
+  margin: 0 !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  opacity: 0.78 !important;
+}
+
+/* Push the old technical inspector lower in hierarchy. */
+body.tm-synapse-command-mode .synapse-inspector {
+  opacity: 0.45 !important;
+  max-height: 160px !important;
+}
+
+/* --- End Technemachina Synapse Long Signal Description --- */
+
+
+/* --- Technemachina Synapse Navigation Smoothing v0.2.9k --- */
+
+body.tm-synapse-command-mode #synapse-canvas {
+  cursor: grab !important;
+  touch-action: none !important;
+  user-select: none !important;
+}
+
+body.tm-synapse-command-mode.tm-synapse-is-grabbing #synapse-canvas,
+body.tm-synapse-command-mode #synapse-canvas.is-grabbing,
+body.tm-synapse-command-mode #synapse-canvas.is-orbiting,
+body.tm-synapse-command-mode #synapse-canvas.is-panning,
+body.tm-synapse-command-mode #synapse-canvas.is-dragging {
+  cursor: grabbing !important;
+}
+
+body.tm-synapse-command-mode .synapse-zoom-controls button {
+  cursor: pointer !important;
+}
+
+/* --- End Technemachina Synapse Navigation Smoothing --- */
+
+
+/* --- Technemachina Synapse Perception Frontend Panel v0.3.0b --- */
+
+.synapse-analyze-btn {
+  border-color: rgba(170, 220, 255, 0.35) !important;
+}
+
+.synapse-perception-panel {
+  margin: 16px 0 18px 0;
+  padding: 18px;
+  border: 1px solid rgba(170, 220, 255, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(130, 190, 255, 0.10), transparent 34%),
+    rgba(5, 8, 14, 0.72);
+  box-shadow: 0 0 35px rgba(80, 150, 255, 0.08);
+}
+
+.synapse-perception-panel.hidden {
+  display: none !important;
+}
+
+.synapse-perception-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.synapse-perception-kicker {
+  margin: 0 0 3px 0;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.synapse-perception-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.synapse-perception-badge {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid rgba(110, 255, 180, 0.30);
+  border-radius: 999px;
+  color: rgba(175, 255, 215, 0.95);
+  background: rgba(50, 255, 150, 0.07);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.synapse-perception-badge.danger {
+  border-color: rgba(255, 90, 90, 0.45);
+  color: rgba(255, 150, 150, 0.95);
+  background: rgba(255, 50, 50, 0.08);
+}
+
+.synapse-perception-overview {
+  margin: 8px 0 16px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  opacity: 0.86;
+}
+
+.synapse-perception-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.synapse-perception-card {
+  min-height: 120px;
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.synapse-perception-card h4 {
+  margin: 0 0 9px 0;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.synapse-perception-list {
+  display: grid;
+  gap: 8px;
+}
+
+.synapse-perception-item {
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.synapse-perception-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.synapse-perception-item strong {
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.synapse-confidence {
+  flex: 0 0 auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  opacity: 0.78;
+}
+
+.synapse-confidence-strong {
+  color: rgba(165, 235, 255, 0.95);
+}
+
+.synapse-confidence-moderate {
+  color: rgba(245, 220, 155, 0.95);
+}
+
+.synapse-confidence-tentative {
+  color: rgba(255, 170, 170, 0.95);
+}
+
+.synapse-perception-meta,
+.synapse-perception-body {
+  margin: 5px 0 0 0;
+  font-size: 11px;
+  line-height: 1.42;
+  opacity: 0.68;
+}
+
+.synapse-perception-body {
+  opacity: 0.78;
+}
+
+@media (max-width: 900px) {
+  .synapse-perception-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- End Technemachina Synapse Perception Frontend Panel --- */
+
+
+/* --- Technemachina Synapse Perception Frontend Panel v0.3.0b --- */
+
+.synapse-analyze-btn {
+  border-color: rgba(170, 220, 255, 0.35) !important;
+}
+
+.synapse-perception-panel {
+  margin: 16px 0 18px 0;
+  padding: 18px;
+  border: 1px solid rgba(170, 220, 255, 0.18);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(130, 190, 255, 0.10), transparent 34%),
+    rgba(5, 8, 14, 0.72);
+  box-shadow: 0 0 35px rgba(80, 150, 255, 0.08);
+}
+
+.synapse-perception-panel.hidden {
+  display: none !important;
+}
+
+.synapse-perception-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.synapse-perception-kicker {
+  margin: 0 0 3px 0;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.synapse-perception-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+
+.synapse-perception-badge {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid rgba(110, 255, 180, 0.30);
+  border-radius: 999px;
+  color: rgba(175, 255, 215, 0.95);
+  background: rgba(50, 255, 150, 0.07);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.synapse-perception-badge.danger {
+  border-color: rgba(255, 90, 90, 0.45);
+  color: rgba(255, 150, 150, 0.95);
+  background: rgba(255, 50, 50, 0.08);
+}
+
+.synapse-perception-overview {
+  margin: 8px 0 16px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  opacity: 0.86;
+}
+
+.synapse-perception-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.synapse-perception-card {
+  min-height: 120px;
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.synapse-perception-card h4 {
+  margin: 0 0 9px 0;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.synapse-perception-list {
+  display: grid;
+  gap: 8px;
+}
+
+.synapse-perception-item {
+  padding: 9px 10px;
+  border-radius: 11px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.synapse-perception-item-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.synapse-perception-item strong {
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.synapse-confidence {
+  flex: 0 0 auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  opacity: 0.78;
+}
+
+.synapse-confidence-strong {
+  color: rgba(165, 235, 255, 0.95);
+}
+
+.synapse-confidence-moderate {
+  color: rgba(245, 220, 155, 0.95);
+}
+
+.synapse-confidence-tentative {
+  color: rgba(255, 170, 170, 0.95);
+}
+
+.synapse-perception-meta,
+.synapse-perception-body {
+  margin: 5px 0 0 0;
+  font-size: 11px;
+  line-height: 1.42;
+  opacity: 0.68;
+}
+
+.synapse-perception-body {
+  opacity: 0.78;
+}
+
+@media (max-width: 900px) {
+  .synapse-perception-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- End Technemachina Synapse Perception Frontend Panel --- */
+
+
+/* --- Technemachina Synapse Perception Inspector Linking v0.3.1 --- */
+
+.synapse-perception-clickable {
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.synapse-perception-clickable:hover {
+  border-color: rgba(170, 220, 255, 0.24);
+  background: rgba(90, 150, 255, 0.075);
+  transform: translateY(-1px);
+  box-shadow: 0 0 18px rgba(90, 150, 255, 0.08);
+}
+
+.synapse-perception-clickable:active {
+  transform: translateY(0);
+}
+
+/* --- End Technemachina Synapse Perception Inspector Linking --- */
+
+
+/* --- Technemachina Synapse Bridge Path Highlighting v0.3.2 --- */
+
+.synapse-perception-clickable[data-synapse-source-id][data-synapse-target-id] {
+  border-color: rgba(255, 220, 150, 0.16);
+}
+
+.synapse-perception-clickable[data-synapse-source-id][data-synapse-target-id]:hover {
+  border-color: rgba(255, 220, 150, 0.35);
+  background: rgba(255, 210, 120, 0.075);
+  box-shadow: 0 0 20px rgba(255, 210, 120, 0.10);
+}
+
+/* --- End Technemachina Synapse Bridge Path Highlighting --- */
+
+
+/* --- Technemachina Synapse Perception Selection Memory v0.3.3 --- */
+
+.synapse-perception-item-active {
+  border-color: rgba(255, 225, 160, 0.42) !important;
+  background:
+    radial-gradient(circle at top left, rgba(255, 220, 140, 0.16), transparent 45%),
+    rgba(255, 210, 120, 0.075) !important;
+  box-shadow:
+    0 0 0 1px rgba(255, 220, 140, 0.08),
+    0 0 22px rgba(255, 210, 120, 0.12);
+}
+
+.synapse-perception-item-active .synapse-perception-item-top strong::before {
+  content: "↳ ";
+  color: rgba(255, 220, 150, 0.95);
+}
+
+/* --- End Technemachina Synapse Perception Selection Memory --- */
+
+
+/* --- Technemachina Synapse Perception Detail Drawer v0.3.4 --- */
+
+.synapse-perception-detail-drawer {
+  margin: 14px 0 16px 0;
+  padding: 14px;
+  border: 1px solid rgba(255, 220, 150, 0.18);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 210, 120, 0.10), transparent 40%),
+    rgba(0, 0, 0, 0.24);
+}
+
+.synapse-perception-detail-drawer.hidden {
+  display: none !important;
+}
+
+.synapse-perception-detail-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.synapse-perception-detail-header h4 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.synapse-perception-detail-body {
+  display: grid;
+  gap: 7px;
+}
+
+.synapse-perception-detail-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 11px;
+}
+
+.synapse-perception-detail-row span {
+  opacity: 0.56;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.synapse-perception-detail-row strong {
+  font-weight: 500;
+  opacity: 0.9;
+  overflow-wrap: anywhere;
+}
+
+/* --- End Technemachina Synapse Perception Detail Drawer --- */
+
+
+/* --- Technemachina Synapse Perception Oracle Notes v0.3.5 --- */
+
+.synapse-oracle-note-box {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(180, 150, 255, 0.20);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at bottom left, rgba(170, 120, 255, 0.10), transparent 42%),
+    rgba(255, 255, 255, 0.028);
+}
+
+.synapse-oracle-note-box.hidden {
+  display: none !important;
+}
+
+.synapse-oracle-note-boundary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  border: 1px solid rgba(180, 150, 255, 0.14);
+  background: rgba(120, 80, 255, 0.055);
+}
+
+.synapse-oracle-note-boundary strong {
+  font-size: 11px;
+}
+
+.synapse-oracle-note-boundary span {
+  font-size: 10px;
+  opacity: 0.68;
+}
+
+.synapse-oracle-note-box label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.68;
+}
+
+#synapse-oracle-note-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 86px;
+  padding: 10px 11px;
+  border-radius: 10px;
+  border: 1px solid rgba(220, 210, 255, 0.15);
+  background: rgba(0, 0, 0, 0.32);
+  color: rgba(245, 247, 255, 0.92);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  outline: none;
+}
+
+#synapse-oracle-note-input:focus {
+  border-color: rgba(190, 160, 255, 0.38);
+  box-shadow: 0 0 18px rgba(160, 110, 255, 0.10);
+}
+
+.synapse-oracle-note-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.synapse-oracle-note-status {
+  margin: 8px 0 0 0;
+  font-size: 11px;
+  opacity: 0.62;
+}
+
+/* --- End Technemachina Synapse Perception Oracle Notes --- */
+
+
+/* --- Technemachina Detail Drawer Back-to-Map Repair v0.3.6b --- */
+
+.synapse-detail-return-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px 0;
+}
+
+.synapse-detail-return-controls button {
+  cursor: pointer;
+  border: 1px solid rgba(170, 220, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(90, 150, 255, 0.07);
+  color: rgba(245, 247, 255, 0.88);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 7px 11px;
+}
+
+.synapse-detail-return-controls button:hover {
+  border-color: rgba(170, 220, 255, 0.34);
+  background: rgba(90, 150, 255, 0.12);
+}
+
+/* --- End Technemachina Detail Drawer Back-to-Map Repair --- */
+
+
+/* --- Technemachina Synapse Map-Only View Toggle v0.3.6c --- */
+
+.synapse-map-view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 12px 0;
+}
+
+.synapse-map-view-controls button {
+  cursor: pointer;
+  border: 1px solid rgba(170, 220, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(90, 150, 255, 0.07);
+  color: rgba(245, 247, 255, 0.88);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 7px 11px;
+}
+
+.synapse-map-view-controls button:hover {
+  border-color: rgba(170, 220, 255, 0.34);
+  background: rgba(90, 150, 255, 0.12);
+}
+
+/* Hide card-heavy perception surfaces, keep map + companion console visible */
+.synapse-map-only-mode #synapse-perception-panel,
+.synapse-map-only-mode #synapse-perception-detail-drawer,
+.synapse-map-only-mode #synapse-perception-galaxies,
+.synapse-map-only-mode #synapse-perception-central,
+.synapse-map-only-mode #synapse-perception-bridges,
+.synapse-map-only-mode #synapse-perception-limitations {
+  display: none !important;
+}
+
+/* --- End Technemachina Synapse Map-Only View Toggle --- */
+
+
+/* --- Technemachina Synapse Museum Distance / Ambient Orbit v0.3.6d --- */
+
+.synapse-layout,
+.synapse-map-shell,
+#synapse-map,
+#synapse-map-canvas {
+  transition:
+    box-shadow 900ms ease,
+    filter 900ms ease,
+    transform 900ms ease;
+}
+
+.synapse-layout {
+  position: relative;
+}
+
+.synapse-layout::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 8px;
+  border-radius: 28px;
+  border: 1px solid rgba(210, 230, 255, 0.08);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.055), transparent 24%, transparent 76%, rgba(180,220,255,0.035)),
+    radial-gradient(circle at 50% 18%, rgba(170,210,255,0.07), transparent 34%);
+  box-shadow:
+    inset 0 0 44px rgba(190, 220, 255, 0.035),
+    0 0 42px rgba(80, 140, 255, 0.045);
+  z-index: 0;
+}
+
+.synapse-layout > * {
+  position: relative;
+  z-index: 1;
+}
+
+.synapse-museum-view-active .synapse-layout {
+  box-shadow:
+    0 0 70px rgba(90, 150, 255, 0.07),
+    inset 0 0 80px rgba(255, 255, 255, 0.018);
+}
+
+.synapse-museum-view-active #synapse-map-canvas,
+.synapse-museum-view-active .synapse-map-canvas {
+  filter:
+    drop-shadow(0 0 16px rgba(170, 210, 255, 0.08))
+    saturate(1.04)
+    contrast(1.03);
+}
+
+/* --- End Technemachina Synapse Museum Distance / Ambient Orbit --- */
+
+
+/* --- Technemachina Synapse Companion Console Shell Repair --- */
+
+.synapse-companion-console {
+  margin: 16px 0 18px 0;
+  padding: 15px;
+  border: 1px solid rgba(170, 220, 255, 0.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at top right, rgba(110, 170, 255, 0.10), transparent 42%),
+    rgba(3, 6, 12, 0.70);
+  box-shadow: 0 0 30px rgba(80, 150, 255, 0.06);
+}
+
+.synapse-companion-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.synapse-companion-header h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.synapse-companion-pill {
+  padding: 6px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 220, 255, 0.22);
+  background: rgba(110, 170, 255, 0.07);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  opacity: 0.84;
+}
+
+.synapse-companion-context {
+  margin: 8px 0 11px 0;
+  padding: 8px 10px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 12px;
+  opacity: 0.82;
+}
+
+.synapse-companion-messages {
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 13px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.synapse-companion-message {
+  padding: 9px 10px;
+  border-radius: 11px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.synapse-companion-message.companion {
+  border: 1px solid rgba(170, 220, 255, 0.12);
+  background: rgba(90, 150, 255, 0.06);
+}
+
+.synapse-companion-message.oracle {
+  margin-left: 18px;
+  border: 1px solid rgba(255, 220, 150, 0.14);
+  background: rgba(255, 210, 120, 0.055);
+}
+
+.synapse-companion-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 10px 0;
+}
+
+.synapse-companion-quick-actions button,
+.synapse-companion-form button {
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(245, 247, 255, 0.86);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 7px 10px;
+}
+
+.synapse-companion-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+#synapse-companion-input {
+  min-width: 0;
+  padding: 10px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(220, 230, 255, 0.13);
+  background: rgba(0, 0, 0, 0.30);
+  color: rgba(245, 247, 255, 0.92);
+  outline: none;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.synapse-companion-boundary {
+  margin: 9px 0 0 0;
+  font-size: 10px;
+  opacity: 0.56;
+}
+
+/* --- End Technemachina Synapse Companion Console Shell Repair --- */
