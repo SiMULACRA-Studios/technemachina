@@ -220,7 +220,7 @@ function add(role, text) {
 }
 
 async function loadContext() {
-  const res = await fetch("http://127.0.0.1:8000/synapse/map");
+  const res = await fetch("http://127.0.0.1:8000/synapse/map?view=companion");
   const raw = await res.json();
   const normalized = normalizeSynapseMap(raw);
   const summary = summarizeSynapseData(normalized);
@@ -477,7 +477,7 @@ Permission is view-only.
 Ask me: Where are we?`);
 } catch (error) {
   context.textContent = "Context failed to load: " + error.message;
-  add("Daemon", "I am here, but Synapse context failed to load. Check the backend at http://127.0.0.1:8000/synapse/map.");
+  add("Daemon", "I am here, but Synapse context failed to load. Check the backend at http://127.0.0.1:8000/synapse/map?view=companion.");
 }
 </script>
 </body>

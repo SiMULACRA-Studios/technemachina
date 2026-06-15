@@ -2711,8 +2711,8 @@ async function loadSynapseMap() {
     const subtitle = document.getElementById("synapse-inspector-subtitle");
 
     const endpoint = window.location.protocol === "file:"
-        ? "http://127.0.0.1:8000/synapse/map"
-        : "http://127.0.0.1:8000/synapse/map";
+        ? "http://127.0.0.1:8000/synapse/map?view=developer_history"
+        : "http://127.0.0.1:8000/synapse/map?view=developer_history";
 
     try {
         if (title) title.textContent = "Loading constellation…";
