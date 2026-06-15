@@ -211,6 +211,52 @@ Technemachina is active research software. It is not yet a polished consumer app
 
 ---
 
+## Synapse API and Ownership Views
+
+Technemachina exposes the Synapse graph through the read-only `GET /synapse/map` endpoint.
+
+Without a `view` parameter, the endpoint returns the complete graph for backward compatibility.
+
+### Available views
+
+| View | Ownership scope | Intended use |
+| --- | --- | --- |
+| `personal` | `personal` | Personal living-state records |
+| `personal_governance` | `personal_governance` | Personal governance records |
+| `imported_knowledge` | `imported` | Imported knowledge |
+| `imported_governance` | `imported_governance` | Imported governance records |
+| `developer_history` | `developer` | Project biography and development history |
+| `system` | `system` | Operational system records |
+| `system_doctrine` | `system_doctrine` | Stable architecture and doctrine |
+| `companion` | Personal, imported, governance, system, and doctrine scopes | Bounded Companion context |
+| `all` | All recognized scopes | Explicit complete graph |
+
+Example requests:
+
+- `GET /synapse/map?view=companion`
+- `GET /synapse/map?view=developer_history`
+- `GET /synapse/map?view=personal`
+- `GET /synapse/map?view=imported_knowledge`
+- `GET /synapse/map?view=all`
+
+Views can be combined with existing filters, for example:
+
+- `GET /synapse/map?view=developer_history&entity_type=milestone_cluster`
+
+### Companion isolation
+
+The `companion` view deliberately excludes every node whose `owner_scope` is `developer`. It may retrieve from `personal`, `personal_governance`, `imported`, `imported_governance`, `system`, and `system_doctrine`.
+
+The main Synapse constellation requests `view=developer_history`. The dedicated Companion shell requests `view=companion`. The `/synapse/analysis` endpoint continues to analyze the complete graph.
+
+Server-side projection removes disallowed nodes, removes edges whose endpoints are no longer present, recalculates graph counts, records the selected view in response metadata, and rejects unknown views with HTTP 400.
+
+Run the ownership-view regression suite with:
+
+- `daemon/.venv/bin/python -m unittest -v tests/test_synapse_scope_views.py`
+
+---
+
 ## Public Baseline and Private Living State
 
 A clean checkout currently reconstructs the verified **public reproducible baseline**:
