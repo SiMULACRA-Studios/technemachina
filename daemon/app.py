@@ -1,3 +1,4 @@
+import asyncio
 import json
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -49,6 +50,17 @@ app.add_middleware(
 
 
 memory.init_db()
+
+COMPANION_ASSOCIATION_CONTEXT_LIMIT = 8
+COMPANION_SUGGESTIONS_LIMIT = 3
+COMPANION_DESCRIPTION_MAX_CHARS = 2000
+
+
+class CompanionRequest(BaseModel):
+    user_message: str
+    selected_node_id: str
+    view: str = "companion"
+
 
 class ChatRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=20000)
@@ -561,6 +573,233 @@ async def revoke_memory_endpoint(record_id: str, req: MemoryRevokeRequest):
     return {"status": "success", "record": record}
 
 
+
+
+def _companion_node_id(node: dict) -> str:
+    return str(node.get("id") or "")
+
+
+def _companion_edge_endpoint(edge: dict, side: str) -> str:
+    aliases = {
+        "source": ("source", "from", "source_id"),
+        "target": ("target", "to", "target_id"),
+    }
+
+    for key in aliases[side]:
+        value = edge.get(key)
+
+        if isinstance(value, dict):
+            value = value.get("id")
+
+        if value:
+            return str(value)
+
+    return ""
+
+
+def _companion_associations(
+    selected_node_id: str,
+    nodes: list[dict],
+    edges: list[dict],
+) -> list[dict]:
+    nodes_by_id = {
+        _companion_node_id(node): node
+        for node in nodes
+        if _companion_node_id(node)
+    }
+
+    associated_ids: list[str] = []
+
+    for edge in edges:
+        source_id = _companion_edge_endpoint(edge, "source")
+        target_id = _companion_edge_endpoint(edge, "target")
+
+        if source_id == selected_node_id and target_id:
+            associated_ids.append(target_id)
+        elif target_id == selected_node_id and source_id:
+            associated_ids.append(source_id)
+
+    associations: list[dict] = []
+
+    for node_id in dict.fromkeys(associated_ids):
+        node = nodes_by_id.get(node_id)
+
+        if not node:
+            continue
+
+        associations.append({
+            "id": node_id,
+            "title": (
+                node.get("title")
+                or node.get("label")
+                or node.get("name")
+                or node_id
+            ),
+            "owner_scope": node.get("owner_scope"),
+        })
+
+    return associations
+
+
+@app.post("/companion/respond")
+async def companion_respond(req: CompanionRequest):
+    if req.view != "companion":
+        raise HTTPException(
+            status_code=400,
+            detail="Companion responses require view=companion",
+        )
+
+    user_message = req.user_message.strip()
+    selected_node_id = req.selected_node_id.strip()
+
+    if not user_message:
+        raise HTTPException(
+            status_code=400,
+            detail="user_message is required",
+        )
+
+    if not selected_node_id:
+        raise HTTPException(
+            status_code=400,
+            detail="selected_node_id is required",
+        )
+
+    companion_graph = await synapse_map_payload(view="companion")
+    nodes = list(companion_graph.get("nodes", []))
+    edges = list(
+        companion_graph.get("edges")
+        or companion_graph.get("relations")
+        or []
+    )
+
+    selected_node = next(
+        (
+            node
+            for node in nodes
+            if _companion_node_id(node) == selected_node_id
+        ),
+        None,
+    )
+
+    if selected_node is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected node is not available in the Companion view",
+        )
+
+    associations = _companion_associations(
+        selected_node_id=selected_node_id,
+        nodes=nodes,
+        edges=edges,
+    )
+
+    selected_title = (
+        selected_node.get("title")
+        or selected_node.get("label")
+        or selected_node.get("name")
+        or selected_node_id
+    )
+
+    selected_description_raw = str(
+        selected_node.get("description")
+        or selected_node.get("summary")
+        or selected_node.get("body")
+        or ""
+    )
+
+    description_truncated = (
+        len(selected_description_raw)
+        > COMPANION_DESCRIPTION_MAX_CHARS
+    )
+
+    if description_truncated:
+        selected_description = (
+            selected_description_raw[
+                :COMPANION_DESCRIPTION_MAX_CHARS
+            ]
+            + "\n[...truncated]"
+        )
+    else:
+        selected_description = selected_description_raw
+
+    association_context = "\n".join(
+        f'- {item["title"]} [{item["id"]}]'
+        for item in associations[
+            :COMPANION_ASSOCIATION_CONTEXT_LIMIT
+        ]
+    ) or "- No permitted neighboring nodes were found."
+
+    grounded_prompt = f"""
+You are the Technemachina Companion operating through the Synapse Map.
+
+Surface: Map-local
+View: companion
+Permission boundary: Read-only. Memory mutation is Oracle-gated.
+Grounding rule: Use only the selected node and permitted associations supplied below.
+Do not claim that memory was changed, saved, approved, or executed.
+
+Selected node:
+ID: {selected_node_id}
+Title: {selected_title}
+Owner scope: {selected_node.get("owner_scope", "unknown")}
+Description:
+{selected_description}
+
+Permitted associations:
+{association_context}
+
+Oracle's question:
+{user_message}
+
+Answer warmly and directly. Explain what is grounded in Synapse and clearly
+acknowledge when the supplied context is insufficient.
+""".strip()
+
+    answer = await asyncio.to_thread(
+        ai.query_model,
+        grounded_prompt,
+        "auto",
+    )
+
+    suggestions = [
+        {
+            "action": "inspect_association",
+            "node_id": item["id"],
+            "label": f'Explore {item["title"]}',
+        }
+        for item in associations[:COMPANION_SUGGESTIONS_LIMIT]
+    ]
+
+    if not suggestions:
+        suggestions = [{
+            "action": "ask_follow_up",
+            "node_id": selected_node_id,
+            "label": f"Ask a follow-up about {selected_title}",
+        }]
+
+    return {
+        "answer": answer,
+        "selected_node": {
+            "id": selected_node_id,
+            "title": selected_title,
+            "owner_scope": selected_node.get("owner_scope"),
+        },
+        "grounding": {
+            "primary": "synapse",
+            "selected_node_id": selected_node_id,
+            "association_count": len(associations),
+            "live_web": False,
+            "description_truncated": description_truncated,
+        },
+        "associations": associations,
+        "suggestions": suggestions,
+        "permissions": {
+            "memory_mutation": "oracle_gated",
+            "read_only": True,
+            "surface": "map_local",
+        },
+        "view": "companion",
+    }
 
 
 @app.get("/companion/surface-context")
