@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1"
+    >
+    <title>Technemachina Companion Hologram — Milestone 1</title>
+    <link
+      rel="stylesheet"
+      href="./companion/companion-hologram-test.css"
+    >
+  </head>
+
+  <body>
+    <main class="hologram-test-shell">
+      <header class="hologram-test-header">
+        <div>
+          <p class="hologram-test-kicker">
+            CompanionHologram / Milestone 1
+          </p>
+          <h1 class="hologram-test-title">
+            Standalone Static Watcher
+          </h1>
+        </div>
+
+        <p class="hologram-test-boundary">
+          Local surface · Read-only · Not connected to Synapse
+        </p>
+      </header>
+
+      <section
+        class="hologram-stage"
+        aria-label="Standalone Companion hologram test"
+      >
+        <div
+          id="companion-hologram"
+          class="companion-hologram-host"
+        ></div>
+
+        <p class="hologram-stage-label">
+          Hero mode / static render
+        </p>
+      </section>
+    </main>
+
+    <script type="module">
+      import {
+        CompanionHologram,
+      } from "./companion/CompanionHologram.js?v=milestone-2-1";
+
+      const host = document.querySelector("#companion-hologram");
+      const hologram = new CompanionHologram();
+
+      hologram
+        .mount(host)
+        .setMode("hero")
+        .setState({
+          status: "idle",
+        });
+
+      window.companionHologram = hologram;
+
+      window.addEventListener(
+        "pagehide",
+        () => {
+          hologram.dispose();
+        },
+        { once: true },
+      );
+    </script>
+  </body>
+</html>
