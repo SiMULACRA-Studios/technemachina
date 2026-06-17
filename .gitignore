@@ -69,3 +69,22 @@ daemon/app.before_*.py
 
 # Verified recovery snapshots stay local and in external archives
 recovery_snapshots/
+
+# Companion visual archive runtime outputs
+docs/companion-progress/latest.png
+docs/companion-progress/manifest.json
+docs/companion-progress/raw/*
+docs/companion-progress/captures/*
+docs/companion-progress/diagnostics/*
+docs/companion-progress/archive/*
+
+# Keep archive directory placeholders
+!docs/companion-progress/raw/.gitkeep
+!docs/companion-progress/captures/.gitkeep
+!docs/companion-progress/diagnostics/.gitkeep
+!docs/companion-progress/archive/.gitkeep
+
+# Companion archive local tooling runtime
+tools/companion_archive/.venv/
+tools/companion_archive/__pycache__/
+tools/companion_archive/**/*.pyc
