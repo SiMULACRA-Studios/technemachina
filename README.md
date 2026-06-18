@@ -587,3 +587,11 @@ Until a license file is added, the source remains publicly viewable but does not
 Core framing:
 
 > Technemachina is a local-first AI companion and research architecture that makes persistent memory, decision traces, and knowledge governance visible, reviewable, and user-controlled.
+
+<div align="center">
+
+<br>
+
+<img src="assets/technemachina-emblem-footer.png" alt="Technemachina SiM Emblem" width="220">
+
+</div>
