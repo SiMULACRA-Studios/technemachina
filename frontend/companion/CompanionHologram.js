@@ -428,8 +428,8 @@ function createNexus() {
   const group = new THREE.Group();
 
   const wideTexture = createRadialTexture({
-    inner: "rgba(255,255,255,0.4)",
-    middle: "rgba(210,234,255,0.16)",
+    inner: "rgba(255,255,255,0.48)",
+    middle: "rgba(210,234,255,0.2)",
     outer: "rgba(160,205,255,0)",
   });
 
@@ -449,26 +449,26 @@ function createNexus() {
     new THREE.SpriteMaterial({
       map: wideTexture,
       transparent: true,
-      opacity: 0.72,
+      opacity: 0.78,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
   );
 
-  wideHalo.scale.set(0.9, 0.62, 1);
+  wideHalo.scale.set(1.04, 0.72, 1);
   group.add(wideHalo);
 
   const middleHalo = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: middleTexture,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.58,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
   );
 
-  middleHalo.scale.set(0.56, 0.4, 1);
+  middleHalo.scale.set(0.68, 0.48, 1);
   middleHalo.position.z = 0.01;
   group.add(middleHalo);
 
@@ -476,18 +476,18 @@ function createNexus() {
     new THREE.SpriteMaterial({
       map: tightTexture,
       transparent: true,
-      opacity: 0.78,
+      opacity: 0.86,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
   );
 
-  tightHalo.scale.set(0.125, 0.17, 1);
+  tightHalo.scale.set(0.14, 0.19, 1);
   tightHalo.position.z = 0.02;
   group.add(tightHalo);
 
   const core = new THREE.Mesh(
-    new THREE.CircleGeometry(0.0072, 32),
+    new THREE.CircleGeometry(0.0082, 32),
     new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -535,8 +535,8 @@ function createVerticalAxis() {
     createBeamSegment({
       y: 1.66,
       height: 2.08,
-      width: 1.14,
-      opacity: 0.2,
+      width: 1.34,
+      opacity: 0.23,
     }),
   );
 
@@ -544,8 +544,8 @@ function createVerticalAxis() {
     createBeamSegment({
       y: -1.72,
       height: 2.18,
-      width: 1.24,
-      opacity: 0.22,
+      width: 1.46,
+      opacity: 0.25,
     }),
   );
 
@@ -553,8 +553,8 @@ function createVerticalAxis() {
     createBeamSegment({
       y: 1.7,
       height: 1.78,
-      width: 0.56,
-      opacity: 0.27,
+      width: 0.68,
+      opacity: 0.25,
     }),
   );
 
@@ -562,17 +562,17 @@ function createVerticalAxis() {
     createBeamSegment({
       y: -1.76,
       height: 1.92,
-      width: 0.66,
-      opacity: 0.3,
+      width: 0.82,
+      opacity: 0.28,
     }),
   );
 
   group.add(
     createBeamSegment({
       y: -2.08,
-      height: 0.92,
-      width: 1.34,
-      opacity: 0.18,
+      height: 1.02,
+      width: 1.62,
+      opacity: 0.22,
     }),
   );
 
@@ -655,17 +655,17 @@ function createProjectionBase() {
   );
 
   const reflectionTexture = createRadialTexture({
-    inner: "rgba(255,255,255,0.58)",
-    middle: "rgba(210,234,255,0.16)",
+    inner: "rgba(255,255,255,0.68)",
+    middle: "rgba(210,234,255,0.22)",
     outer: "rgba(140,195,255,0)",
   });
 
   const reflection = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.68, 0.16),
+    new THREE.PlaneGeometry(0.88, 0.2),
     new THREE.MeshBasicMaterial({
       map: reflectionTexture,
       transparent: true,
-      opacity: 0.76,
+      opacity: 0.84,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       side: THREE.DoubleSide,
@@ -795,70 +795,70 @@ function createWatcherEye() {
   const irisOuter = new THREE.LineBasicMaterial({
     color: 0xb7d3f5,
     transparent: true,
-    opacity: 0.13,
+    opacity: 0.16,
     depthWrite: false,
   });
 
   const irisContourPrimary = new THREE.LineBasicMaterial({
     color: 0xe9f4ff,
     transparent: true,
-    opacity: 0.46,
+    opacity: 0.56,
     depthWrite: false,
   });
 
   const irisContourSecondary = new THREE.LineBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.3,
+    opacity: 0.34,
     depthWrite: false,
   });
 
   const chamberRear = new THREE.LineBasicMaterial({
     color: 0x9fc5f5,
     transparent: true,
-    opacity: 0.18,
+    opacity: 0.24,
     depthWrite: false,
   });
 
   const chamberNear = new THREE.LineBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.38,
+    opacity: 0.52,
     depthWrite: false,
   });
 
   const chamberConnector = new THREE.LineBasicMaterial({
     color: 0xd7ecff,
     transparent: true,
-    opacity: 0.16,
+    opacity: 0.22,
     depthWrite: false,
   });
 
   const chamberSegment = new THREE.LineBasicMaterial({
     color: 0xf7fbff,
     transparent: true,
-    opacity: 0.2,
+    opacity: 0.34,
     depthWrite: false,
   });
 
   const chamberShadow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.34, 80),
+    new THREE.CircleGeometry(0.37, 80),
     new THREE.MeshBasicMaterial({
       color: 0x000206,
       transparent: true,
-      opacity: 0.34,
+      opacity: 0.28,
       depthWrite: false,
     }),
   );
 
   chamberShadow.position.z = 0.045;
-  chamberShadow.scale.set(0.96, 0.74, 1);
+  chamberShadow.scale.set(1.02, 0.78, 1);
   group.add(chamberShadow);
 
   group.add(
     createEllipse({
-      radiusX: 0.46,
-      radiusY: 0.255,
+      radiusX: 0.52,
+      radiusY: 0.29,
       z: 0.08,
       material: irisOuter,
     }),
@@ -866,8 +866,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.37,
-      radiusY: 0.205,
+      radiusX: 0.42,
+      radiusY: 0.232,
       start: 22,
       end: 144,
       z: 0.108,
@@ -880,8 +880,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.43,
-      radiusY: 0.232,
+      radiusX: 0.49,
+      radiusY: 0.262,
       start: 210,
       end: 310,
       z: 0.12,
@@ -894,8 +894,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.5,
-      radiusY: 0.27,
+      radiusX: 0.56,
+      radiusY: 0.3,
       start: -170,
       end: -34,
       z: 0.054,
@@ -908,8 +908,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.44,
-      radiusY: 0.228,
+      radiusX: 0.5,
+      radiusY: 0.255,
       start: -24,
       end: 96,
       z: 0.07,
@@ -922,8 +922,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.205,
-      radiusY: 0.118,
+      radiusX: 0.245,
+      radiusY: 0.138,
       start: 202,
       end: 342,
       z: 0.146,
@@ -936,8 +936,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.245,
-      radiusY: 0.132,
+      radiusX: 0.29,
+      radiusY: 0.155,
       start: 14,
       end: 120,
       z: 0.14,
@@ -950,8 +950,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.78,
-      radiusY: 0.36,
+      radiusX: 0.86,
+      radiusY: 0.39,
       start: 42,
       end: 118,
       z: 0.085,
@@ -964,8 +964,8 @@ function createWatcherEye() {
 
   group.add(
     createArc({
-      radiusX: 0.8,
-      radiusY: 0.34,
+      radiusX: 0.88,
+      radiusY: 0.37,
       start: 222,
       end: 302,
       z: 0.082,
@@ -979,8 +979,8 @@ function createWatcherEye() {
   group.add(
     createLine(
       [
-        new THREE.Vector3(-0.11, 0.045, 0.152),
-        new THREE.Vector3(-0.04, 0.018, 0.152),
+        new THREE.Vector3(-0.15, 0.055, 0.152),
+        new THREE.Vector3(-0.055, 0.022, 0.152),
       ],
       chamberSegment,
     ),
@@ -989,8 +989,8 @@ function createWatcherEye() {
   group.add(
     createLine(
       [
-        new THREE.Vector3(0.05, -0.02, 0.152),
-        new THREE.Vector3(0.13, -0.055, 0.152),
+        new THREE.Vector3(0.06, -0.024, 0.152),
+        new THREE.Vector3(0.17, -0.066, 0.152),
       ],
       chamberSegment,
     ),
@@ -999,25 +999,25 @@ function createWatcherEye() {
   group.add(
     createLine(
       [
-        new THREE.Vector3(-0.16, -0.03, 0.118),
-        new THREE.Vector3(-0.095, -0.065, 0.118),
+        new THREE.Vector3(-0.19, -0.036, 0.118),
+        new THREE.Vector3(-0.112, -0.078, 0.118),
       ],
       chamberRear,
     ),
   );
 
   const pupil = new THREE.Mesh(
-    new THREE.CircleGeometry(0.235, 88),
+    new THREE.CircleGeometry(0.25, 88),
     new THREE.MeshBasicMaterial({
       color: 0x000206,
       transparent: true,
-      opacity: 0.98,
+      opacity: 0.94,
       depthWrite: false,
     }),
   );
 
   pupil.position.z = 0.11;
-  pupil.scale.set(0.74, 0.98, 1);
+  pupil.scale.set(0.76, 1, 1);
   group.add(pupil);
 
   const nexus = createNexus();
