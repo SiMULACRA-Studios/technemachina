@@ -264,7 +264,7 @@ function createTerminalCap({
   return cap;
 }
 
-function createLine(points, material, closed = false) {
+function createLine(points, material, closed = false, renderOrder = 0) {
   const finalPoints = closed
     ? [...points, points[0].clone()]
     : points;
@@ -273,7 +273,11 @@ function createLine(points, material, closed = false) {
     finalPoints,
   );
 
-  return new THREE.Line(geometry, material);
+  const line = new THREE.Line(geometry, material);
+
+  line.renderOrder = renderOrder;
+
+  return line;
 }
 
 function createEllipse({
@@ -282,6 +286,7 @@ function createEllipse({
   z = 0,
   material,
   segments = 180,
+  renderOrder = 0,
 }) {
   const points = [];
 
@@ -297,7 +302,7 @@ function createEllipse({
     );
   }
 
-  return createLine(points, material, true);
+  return createLine(points, material, true, renderOrder);
 }
 
 function createArc({
@@ -310,6 +315,7 @@ function createArc({
   offsetY = 0,
   material,
   segments = 96,
+  renderOrder = 0,
 }) {
   const points = [];
 
@@ -327,7 +333,7 @@ function createArc({
     );
   }
 
-  return createLine(points, material);
+  return createLine(points, material, false, renderOrder);
 }
 
 function createGlobe() {
@@ -456,6 +462,8 @@ function createNexus() {
   );
 
   wideHalo.scale.set(1.04, 0.72, 1);
+  wideHalo.position.z = -0.015;
+  wideHalo.renderOrder = 46;
   group.add(wideHalo);
 
   const middleHalo = new THREE.Sprite(
@@ -469,7 +477,8 @@ function createNexus() {
   );
 
   middleHalo.scale.set(0.68, 0.48, 1);
-  middleHalo.position.z = 0.01;
+  middleHalo.position.z = 0.025;
+  middleHalo.renderOrder = 50;
   group.add(middleHalo);
 
   const tightHalo = new THREE.Sprite(
@@ -483,7 +492,8 @@ function createNexus() {
   );
 
   tightHalo.scale.set(0.14, 0.19, 1);
-  tightHalo.position.z = 0.02;
+  tightHalo.position.z = 0.055;
+  tightHalo.renderOrder = 54;
   group.add(tightHalo);
 
   const core = new THREE.Mesh(
@@ -497,7 +507,8 @@ function createNexus() {
     }),
   );
 
-  core.position.z = 0.05;
+  core.position.z = 0.085;
+  core.renderOrder = 58;
   group.add(core);
 
   return group;
@@ -508,6 +519,8 @@ function createBeamSegment({
   height,
   width,
   opacity,
+  z = 0,
+  renderOrder = 0,
 }) {
   const material = new THREE.MeshBasicMaterial({
     map: createBeamTexture(),
@@ -523,7 +536,8 @@ function createBeamSegment({
     material,
   );
 
-  beam.position.set(0, y, 0);
+  beam.position.set(0, y, z);
+  beam.renderOrder = renderOrder;
 
   return beam;
 }
@@ -537,6 +551,8 @@ function createVerticalAxis() {
       height: 2.08,
       width: 1.34,
       opacity: 0.23,
+      z: -0.08,
+      renderOrder: 12,
     }),
   );
 
@@ -546,6 +562,8 @@ function createVerticalAxis() {
       height: 2.18,
       width: 1.46,
       opacity: 0.25,
+      z: -0.08,
+      renderOrder: 12,
     }),
   );
 
@@ -555,6 +573,8 @@ function createVerticalAxis() {
       height: 1.78,
       width: 0.68,
       opacity: 0.25,
+      z: 0,
+      renderOrder: 18,
     }),
   );
 
@@ -564,6 +584,8 @@ function createVerticalAxis() {
       height: 1.92,
       width: 0.82,
       opacity: 0.28,
+      z: 0,
+      renderOrder: 18,
     }),
   );
 
@@ -573,6 +595,8 @@ function createVerticalAxis() {
       height: 1.02,
       width: 1.62,
       opacity: 0.22,
+      z: -0.03,
+      renderOrder: 16,
     }),
   );
 
@@ -582,6 +606,8 @@ function createVerticalAxis() {
       height: 1.22,
       width: 0.022,
       opacity: 0.1,
+      z: 0.06,
+      renderOrder: 22,
     }),
   );
 
@@ -591,6 +617,8 @@ function createVerticalAxis() {
       height: 1.34,
       width: 0.024,
       opacity: 0.11,
+      z: 0.06,
+      renderOrder: 22,
     }),
   );
 
@@ -675,7 +703,12 @@ function createProjectionBase() {
   outer.position.z = -0.02;
   mid.position.z = 0;
   core.position.z = 0.02;
-  reflection.position.z = 0.04;
+  reflection.position.z = 0.07;
+
+  outer.renderOrder = 8;
+  mid.renderOrder = 10;
+  core.renderOrder = 12;
+  reflection.renderOrder = 18;
 
   group.add(outer);
   group.add(mid);
@@ -795,49 +828,49 @@ function createWatcherEye() {
   const irisOuter = new THREE.LineBasicMaterial({
     color: 0xb7d3f5,
     transparent: true,
-    opacity: 0.16,
+    opacity: 0.14,
     depthWrite: false,
   });
 
   const irisContourPrimary = new THREE.LineBasicMaterial({
     color: 0xe9f4ff,
     transparent: true,
-    opacity: 0.56,
+    opacity: 0.58,
     depthWrite: false,
   });
 
   const irisContourSecondary = new THREE.LineBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.34,
+    opacity: 0.36,
     depthWrite: false,
   });
 
   const chamberRear = new THREE.LineBasicMaterial({
     color: 0x9fc5f5,
     transparent: true,
-    opacity: 0.24,
+    opacity: 0.2,
     depthWrite: false,
   });
 
   const chamberNear = new THREE.LineBasicMaterial({
     color: 0xffffff,
     transparent: true,
-    opacity: 0.52,
+    opacity: 0.58,
     depthWrite: false,
   });
 
   const chamberConnector = new THREE.LineBasicMaterial({
     color: 0xd7ecff,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.26,
     depthWrite: false,
   });
 
   const chamberSegment = new THREE.LineBasicMaterial({
     color: 0xf7fbff,
     transparent: true,
-    opacity: 0.34,
+    opacity: 0.4,
     depthWrite: false,
   });
 
@@ -847,11 +880,12 @@ function createWatcherEye() {
       color: 0x000206,
       transparent: true,
       opacity: 0.28,
-      depthWrite: false,
+      depthWrite: true,
     }),
   );
 
-  chamberShadow.position.z = 0.045;
+  chamberShadow.position.z = 0.025;
+  chamberShadow.renderOrder = 24;
   chamberShadow.scale.set(1.02, 0.78, 1);
   group.add(chamberShadow);
 
@@ -859,8 +893,9 @@ function createWatcherEye() {
     createEllipse({
       radiusX: 0.52,
       radiusY: 0.29,
-      z: 0.08,
+      z: 0.07,
       material: irisOuter,
+      renderOrder: 28,
     }),
   );
 
@@ -870,11 +905,12 @@ function createWatcherEye() {
       radiusY: 0.232,
       start: 22,
       end: 144,
-      z: 0.108,
+      z: 0.135,
       offsetX: -0.014,
       offsetY: 0.012,
       material: irisContourPrimary,
       segments: 72,
+      renderOrder: 40,
     }),
   );
 
@@ -884,11 +920,12 @@ function createWatcherEye() {
       radiusY: 0.262,
       start: 210,
       end: 310,
-      z: 0.12,
+      z: 0.128,
       offsetX: 0.022,
       offsetY: -0.01,
       material: irisContourSecondary,
       segments: 64,
+      renderOrder: 38,
     }),
   );
 
@@ -898,11 +935,12 @@ function createWatcherEye() {
       radiusY: 0.3,
       start: -170,
       end: -34,
-      z: 0.054,
+      z: 0.045,
       offsetX: -0.024,
       offsetY: -0.02,
       material: chamberRear,
       segments: 72,
+      renderOrder: 26,
     }),
   );
 
@@ -912,11 +950,12 @@ function createWatcherEye() {
       radiusY: 0.255,
       start: -24,
       end: 96,
-      z: 0.07,
+      z: 0.06,
       offsetX: 0.032,
       offsetY: 0.018,
       material: chamberRear,
       segments: 56,
+      renderOrder: 27,
     }),
   );
 
@@ -926,11 +965,12 @@ function createWatcherEye() {
       radiusY: 0.138,
       start: 202,
       end: 342,
-      z: 0.146,
+      z: 0.172,
       offsetX: 0.008,
       offsetY: -0.006,
       material: chamberNear,
       segments: 72,
+      renderOrder: 48,
     }),
   );
 
@@ -940,11 +980,12 @@ function createWatcherEye() {
       radiusY: 0.155,
       start: 14,
       end: 120,
-      z: 0.14,
+      z: 0.164,
       offsetX: -0.01,
       offsetY: 0.008,
       material: chamberNear,
       segments: 56,
+      renderOrder: 46,
     }),
   );
 
@@ -954,11 +995,12 @@ function createWatcherEye() {
       radiusY: 0.39,
       start: 42,
       end: 118,
-      z: 0.085,
+      z: 0.108,
       offsetX: -0.02,
       offsetY: 0.015,
       material: chamberConnector,
       segments: 56,
+      renderOrder: 34,
     }),
   );
 
@@ -968,11 +1010,12 @@ function createWatcherEye() {
       radiusY: 0.37,
       start: 222,
       end: 302,
-      z: 0.082,
+      z: 0.104,
       offsetX: 0.024,
       offsetY: -0.016,
       material: chamberConnector,
       segments: 56,
+      renderOrder: 34,
     }),
   );
 
@@ -983,6 +1026,8 @@ function createWatcherEye() {
         new THREE.Vector3(-0.055, 0.022, 0.152),
       ],
       chamberSegment,
+      false,
+      50,
     ),
   );
 
@@ -993,16 +1038,20 @@ function createWatcherEye() {
         new THREE.Vector3(0.17, -0.066, 0.152),
       ],
       chamberSegment,
+      false,
+      50,
     ),
   );
 
   group.add(
     createLine(
       [
-        new THREE.Vector3(-0.19, -0.036, 0.118),
-        new THREE.Vector3(-0.112, -0.078, 0.118),
+        new THREE.Vector3(-0.19, -0.036, 0.064),
+        new THREE.Vector3(-0.112, -0.078, 0.064),
       ],
       chamberRear,
+      false,
+      28,
     ),
   );
 
@@ -1012,16 +1061,18 @@ function createWatcherEye() {
       color: 0x000206,
       transparent: true,
       opacity: 0.94,
-      depthWrite: false,
+      depthWrite: true,
     }),
   );
 
-  pupil.position.z = 0.11;
+  pupil.position.z = 0.076;
+  pupil.renderOrder = 30;
   pupil.scale.set(0.76, 1, 1);
   group.add(pupil);
 
   const nexus = createNexus();
-  nexus.position.z = 0.19;
+  nexus.position.z = 0.23;
+  nexus.renderOrder = 52;
   group.add(nexus);
 
   return group;
