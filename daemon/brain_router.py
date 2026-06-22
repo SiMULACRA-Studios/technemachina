@@ -113,9 +113,8 @@ def route(prompt: str, provider: str = "auto") -> str:
 
     record_all_failed(decision, failure_detail)
 
-    return (
-        "Technemachina Daemon body is online, but all configured external brains failed. "
-        "This is a provider/API issue, not a local project failure. "
+    raise RuntimeError(
+        "All configured providers failed. "
         "Failures: " + failure_detail
     )
 
