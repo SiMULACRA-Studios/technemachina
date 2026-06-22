@@ -53,7 +53,7 @@ def query(prompt: str) -> str:
         "gemini-2.5-flash-lite",
     ]
 
-    last_error = None
+    errors = []
 
     for model_name in models_to_try:
         try:
@@ -64,11 +64,7 @@ def query(prompt: str) -> str:
             )
             return response.text
         except Exception as e:
-            last_error = e
+            errors.append(f"{model_name}: {type(e).__name__}: {e}")
             continue
 
-    return (
-        "Technemachina Daemon body is online, but the external Gemini brain is temporarily unavailable. "
-        "This is a provider/API issue, not a local project failure. "
-        f"Last provider error: {type(last_error).__name__}: {last_error}"
-    )
+    raise RuntimeError("All Gemini models failed. " + " | ".join(errors))
