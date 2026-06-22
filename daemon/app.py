@@ -1,7 +1,7 @@
 import asyncio
 import json
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +17,7 @@ import ai
 from brain_status import get_brain_status
 import tools
 import monitor
-from risk import classify_text
+from risk import RiskLevel, classify_text
 import project_context
 import memory_taxonomy
 import memory_retrieval
@@ -1083,6 +1083,17 @@ async def handle_explain(req: ToolRequest):
 @app.post("/debug")
 async def handle_debug(req: ToolRequest):
     risk_report = classify_text(req.code)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Debug request blocked by risk policy.",
+            },
+        )
+
     prompt = tools.format_debug_prompt(req.code)
     reply = ai.query_model(prompt, req.model)
 
