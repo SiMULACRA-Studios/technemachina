@@ -1,0 +1,161 @@
+{
+  "nodes": [
+    {
+      "id": "personal:memory",
+      "type": "memory_record",
+      "owner_scope": "personal",
+      "label": "Fixture Personal Memory",
+      "status": "active"
+    },
+    {
+      "id": "personal:thread",
+      "type": "thread",
+      "owner_scope": "personal",
+      "label": "Fixture Personal Thread",
+      "status": "active"
+    },
+    {
+      "id": "governance:review",
+      "type": "review_item",
+      "owner_scope": "personal_governance",
+      "label": "Fixture Review",
+      "status": "active"
+    },
+    {
+      "id": "governance:decision",
+      "type": "review_decision",
+      "owner_scope": "personal_governance",
+      "label": "Fixture Decision",
+      "status": "active"
+    },
+    {
+      "id": "imported:source",
+      "type": "knowledge_source",
+      "owner_scope": "imported",
+      "label": "Fixture Imported Source",
+      "status": "active"
+    },
+    {
+      "id": "imported:record",
+      "type": "knowledge_record",
+      "owner_scope": "imported",
+      "label": "Fixture Imported Record",
+      "status": "active"
+    },
+    {
+      "id": "imported:candidate",
+      "type": "knowledge_candidate",
+      "owner_scope": "imported_governance",
+      "label": "Fixture Imported Candidate",
+      "status": "active"
+    },
+    {
+      "id": "developer:milestone",
+      "type": "milestone",
+      "owner_scope": "developer",
+      "label": "Fixture Developer Milestone",
+      "status": "active"
+    },
+    {
+      "id": "developer:cluster",
+      "type": "milestone_cluster",
+      "owner_scope": "developer",
+      "label": "Fixture Developer Cluster",
+      "status": "active"
+    },
+    {
+      "id": "system:layer:alpha",
+      "type": "memory_layer",
+      "owner_scope": "system",
+      "label": "Fixture Alpha Layer",
+      "status": "active"
+    },
+    {
+      "id": "system:layer:theta",
+      "type": "memory_layer",
+      "owner_scope": "system",
+      "label": "Fixture Theta Layer",
+      "status": "active"
+    },
+    {
+      "id": "doctrine:daemon",
+      "type": "doctrine",
+      "owner_scope": "system_doctrine",
+      "label": "Fixture Daemon Doctrine",
+      "status": "active"
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:personal:thread",
+      "source": "personal:memory",
+      "target": "personal:thread",
+      "type": "thread_context"
+    },
+    {
+      "id": "edge:review:decision",
+      "source": "governance:review",
+      "target": "governance:decision",
+      "type": "resolved_by"
+    },
+    {
+      "id": "edge:source:record",
+      "source": "imported:source",
+      "target": "imported:record",
+      "type": "contains_record"
+    },
+    {
+      "id": "edge:system:layers",
+      "source": "system:layer:alpha",
+      "target": "system:layer:theta",
+      "type": "adjacent_layer"
+    },
+    {
+      "id": "edge:personal:system",
+      "source": "personal:memory",
+      "target": "system:layer:alpha",
+      "type": "belongs_to_layer"
+    },
+    {
+      "id": "edge:candidate:record",
+      "source": "imported:candidate",
+      "target": "imported:record",
+      "type": "candidate_for"
+    },
+    {
+      "id": "edge:doctrine:system",
+      "source": "doctrine:daemon",
+      "target": "system:layer:theta",
+      "type": "governs"
+    },
+    {
+      "id": "edge:personal:developer",
+      "source": "personal:thread",
+      "target": "developer:milestone",
+      "type": "documents"
+    },
+    {
+      "id": "edge:developer:system",
+      "source": "developer:milestone",
+      "target": "system:layer:alpha",
+      "type": "touches_runtime"
+    },
+    {
+      "id": "edge:milestone:cluster",
+      "source": "developer:milestone",
+      "target": "developer:cluster",
+      "type": "belongs_to_cluster"
+    }
+  ],
+  "meta": {
+    "synapse_version": "fixture",
+    "policy_version": "scope_projection_contract_fixture_v1",
+    "node_count": 12,
+    "edge_count": 10,
+    "filters": {
+      "entity_type": "",
+      "relation_type": ""
+    },
+    "read_only": true
+  }
+}
