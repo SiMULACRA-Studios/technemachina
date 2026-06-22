@@ -7,6 +7,9 @@ Purpose:
 - Confirmed unsafe requests should not be provider-shopped.
 """
 
+import re
+
+
 TECHNICAL_FAILURE_KEYWORDS = [
     "503",
     "502",
@@ -62,6 +65,21 @@ CONFIRMED_UNSAFE_KEYWORDS = [
 ]
 
 
+CONFIRMED_UNSAFE_NORMALIZED_PHRASES = [
+    "key logger",
+    "keystroke recorder",
+]
+
+
+def normalize_keyword_text(value: str) -> str:
+    text = re.sub(r"[^a-z0-9]+", " ", str(value).lower())
+    return " ".join(text.split())
+
+
+def contains_normalized_phrase(text: str, phrase: str) -> bool:
+    return f" {phrase} " in f" {text} "
+
+
 def classify_failure(error_text: str) -> str:
     """
     Classify provider failure text.
@@ -90,8 +108,15 @@ def classify_user_request(prompt: str) -> str:
     It prevents obvious provider-shopping for clearly unsafe requests.
     """
     text = str(prompt).lower()
+    normalized_text = normalize_keyword_text(prompt)
 
     if any(keyword in text for keyword in CONFIRMED_UNSAFE_KEYWORDS):
+        return "confirmed_unsafe"
+
+    if any(
+        contains_normalized_phrase(normalized_text, phrase)
+        for phrase in CONFIRMED_UNSAFE_NORMALIZED_PHRASES
+    ):
         return "confirmed_unsafe"
 
     return "allowed_or_unclear"
