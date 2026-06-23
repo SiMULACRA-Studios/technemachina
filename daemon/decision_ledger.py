@@ -48,8 +48,20 @@ def new_decision(prompt: str, router_mode: str, provider_order: list[str]) -> De
 def write_decision(record: DecisionRecord) -> None:
     LEDGER_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open(LEDGER_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+    line = json.dumps(asdict(record), ensure_ascii=False) + "\n"
+
+    with open(LEDGER_PATH, "a+", encoding="utf-8") as f:
+        position = f.tell()
+
+        try:
+            f.write(line)
+        except OSError:
+            try:
+                f.truncate(position)
+            except OSError:
+                pass
+
+            raise
 
 
 def record_success(
