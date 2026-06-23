@@ -29,29 +29,34 @@ The current Daemon body includes:
 - FastAPI backend
 - browser frontend
 - SQLite memory/history
-- Gemini primary provider
-- OpenRouter fallback provider
-- automatic Gemini to OpenRouter failover
+- provider-aware routing
+- OpenRouter provider
+- Gemini provider
+- automatic provider failover using the executable router order
 - provider attempt/failure/success logging
+- Decision Ledger records of provider path and final outcome
 - brain health endpoint
 - brain status red/green endpoint
 - project context
 - context snapshots
 - system inventory
+- governed memory records and review queue
+- read-only Synapse Map and Synapse analysis
+- bounded Companion responses through the Companion view
 - restriction-aware failover policy
+- BLOCKED `/debug` risk enforcement
 - frontend provider red/green lights
 
 ---
 
 ## Brain Architecture
 
-Primary brain:
-
-- Gemini
-
-Fallback brain:
+Current executable auto provider order:
 
 - OpenRouter
+- Gemini
+
+Each provider prompt also states the runtime provider that is currently answering.
 
 Reserved future brains:
 
@@ -310,4 +315,3 @@ Research-backed future upgrades:
 - Retriever-backed project knowledge
 - Graph-based routing
 - Safe code synthesis pipeline
-
