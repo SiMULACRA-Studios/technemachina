@@ -50,12 +50,13 @@ def route(prompt: str, provider: str = "auto") -> str:
 
         try:
             response = route_specific(prompt, normalized_provider, decision)
-            record_success(decision, normalized_provider, "Specific provider answered successfully.")
-            return response
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
             record_all_failed(decision, detail)
             raise
+
+        record_success(decision, normalized_provider, "Specific provider answered successfully.")
+        return response
 
     decision = new_decision(
         prompt=prompt,
@@ -68,8 +69,6 @@ def route(prompt: str, provider: str = "auto") -> str:
     for provider_name in PROVIDER_ORDER:
         try:
             response = route_specific(prompt, provider_name, decision)
-            record_success(decision, provider_name, f"{provider_name} answered successfully.")
-            return response
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
             errors.append(f"{provider_name}: {detail}")
@@ -101,6 +100,9 @@ def route(prompt: str, provider: str = "auto") -> str:
                 )
 
             continue
+
+        record_success(decision, provider_name, f"{provider_name} answered successfully.")
+        return response
 
     failure_detail = " | ".join(errors)
 

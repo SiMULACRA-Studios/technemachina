@@ -1,4 +1,6 @@
+import fcntl
 import json
+import threading
 import uuid
 from dataclasses import dataclass, asdict, field
 from datetime import datetime, timezone
@@ -7,6 +9,11 @@ from typing import Any
 
 LEDGER_DIR = Path(__file__).resolve().parent.parent / "logs"
 LEDGER_PATH = LEDGER_DIR / "decision_ledger.jsonl"
+_WRITE_LOCK = threading.Lock()
+
+
+def lock_path() -> Path:
+    return LEDGER_PATH.with_name(f"{LEDGER_PATH.name}.lock")
 
 
 def utc_now() -> str:
@@ -45,11 +52,34 @@ def new_decision(prompt: str, router_mode: str, provider_order: list[str]) -> De
     )
 
 
-def write_decision(record: DecisionRecord) -> None:
+def append_jsonl_line(line: str) -> None:
     LEDGER_DIR.mkdir(parents=True, exist_ok=True)
 
-    with open(LEDGER_PATH, "a", encoding="utf-8") as f:
-        f.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+    with _WRITE_LOCK:
+        with open(lock_path(), "a", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+            try:
+                with open(LEDGER_PATH, "a+", encoding="utf-8") as f:
+                    position = f.tell()
+
+                    try:
+                        f.write(line)
+                    except OSError:
+                        try:
+                            f.truncate(position)
+                        except OSError:
+                            pass
+
+                        raise
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def write_decision(record: DecisionRecord) -> None:
+    line = json.dumps(asdict(record), ensure_ascii=False) + "\n"
+
+    append_jsonl_line(line)
 
 
 def record_success(
