@@ -98,4 +98,4 @@ Logs:
 Current provider order:
 
 ```text
-auto: gemini -> openrouter
+auto: openrouter -> gemini
