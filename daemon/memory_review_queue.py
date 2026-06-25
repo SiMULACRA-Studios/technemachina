@@ -330,10 +330,19 @@ def _validate_existing_approval_state(operation: dict, item: dict):
         _approval_conflict()
 
 
-def _validate_approval_target_preflight(item: dict, intended_memory_record_id: str):
+def _validate_approval_target_preflight(item: dict, expected: dict):
     candidate = item.get("candidate_record", {}) or {}
-    if candidate.get("record_id") and not _find_memory_record(intended_memory_record_id):
+    if not candidate.get("record_id"):
+        return
+
+    operation = {
+        "intended_memory_record_id": expected["memory_record_id"],
+        "reviewed_by": expected["reviewed_by"],
+    }
+    record = _find_memory_record(expected["memory_record_id"])
+    if not record:
         _approval_conflict()
+    _validate_approval_memory(record, operation, item)
 
 
 def _find_approval_operation(review_id: str) -> dict | None:
@@ -364,12 +373,12 @@ def _ensure_approval_operation(review_id: str, item: dict, reviewed_by: str, not
         effective_reviewer = _operation_reviewer(existing)
         expected = _expected_approval_projection(review_id, item, effective_reviewer)
         _validate_approval_operation(existing, expected)
-        _validate_approval_target_preflight(item, existing["intended_memory_record_id"])
+        _validate_approval_target_preflight(item, expected)
         _validate_existing_approval_state(existing, item)
         return existing
 
     expected = _expected_approval_projection(review_id, item, reviewed_by)
-    _validate_approval_target_preflight(item, expected["memory_record_id"])
+    _validate_approval_target_preflight(item, expected)
     operation = {
         "operation_id": expected["operation_id"],
         "review_id": review_id,
