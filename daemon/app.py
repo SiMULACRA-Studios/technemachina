@@ -1049,19 +1049,29 @@ async def thread_location():
     }
 
 
+def _get_thread_or_404(thread_id: str) -> dict:
+    if not thread_registry.REGISTRY_PATH.exists():
+        raise HTTPException(status_code=404, detail="thread_not_found")
+
+    thread = thread_registry.get_thread(thread_id)
+
+    if not thread:
+        raise HTTPException(status_code=404, detail="thread_not_found")
+
+    return thread
+
+
 @app.post("/threads/{thread_id}/rename")
 async def rename_thread_endpoint(thread_id: str, req: ThreadRenameRequest):
+    _get_thread_or_404(thread_id)
     thread = thread_registry.rename_thread(thread_id, req.title)
-    if not thread:
-        return {"status": "error", "detail": "thread_not_found"}
     return {"status": "success", "thread": thread}
 
 
 @app.post("/threads/{thread_id}/archive")
 async def archive_thread_endpoint(thread_id: str):
+    _get_thread_or_404(thread_id)
     thread = thread_registry.archive_thread(thread_id)
-    if not thread:
-        return {"status": "error", "detail": "thread_not_found"}
     return {
         "status": "success",
         "thread": thread,
@@ -1072,9 +1082,8 @@ async def archive_thread_endpoint(thread_id: str):
 
 @app.post("/threads/{thread_id}/restore")
 async def restore_thread_endpoint(thread_id: str):
+    _get_thread_or_404(thread_id)
     thread = thread_registry.restore_thread(thread_id)
-    if not thread:
-        return {"status": "error", "detail": "thread_not_found"}
     return {
         "status": "success",
         "thread": thread,
@@ -1085,11 +1094,7 @@ async def restore_thread_endpoint(thread_id: str):
 
 @app.get("/threads/{thread_id}")
 async def get_thread(thread_id: str):
-    thread = thread_registry.get_thread(thread_id)
-
-    if not thread:
-        thread = thread_registry.ensure_thread(thread_id=thread_id)
-
+    thread = _get_thread_or_404(thread_id)
     messages = thread_context.load_messages(thread_id=thread_id, limit=40)
 
     return {
