@@ -34,6 +34,7 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
             patch.object(app.memory_review_queue, "MEMORY_DIR", memory_dir),
             patch.object(app.memory_review_queue, "REVIEW_QUEUE_PATH", memory_dir / "review_queue.jsonl"),
             patch.object(app.memory_review_queue, "REVIEW_DECISIONS_PATH", memory_dir / "review_decisions.jsonl"),
+            patch.object(app.memory_review_queue, "APPROVAL_OPERATIONS_PATH", memory_dir / "approval_operations.jsonl"),
             patch.object(app.memory_taxonomy, "MEMORY_DIR", memory_dir),
             patch.object(app.memory_taxonomy, "MEMORY_RECORDS_PATH", memory_dir / "memory_records.jsonl"),
             patch.object(app.memory_taxonomy, "MEMORY_INDEX_PATH", memory_dir / "memory_index.json"),
@@ -76,6 +77,7 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         return {
             "queue": self.read_jsonl(memory_dir / "review_queue.jsonl"),
             "decisions": self.read_jsonl(memory_dir / "review_decisions.jsonl"),
+            "operations": self.read_jsonl(memory_dir / "approval_operations.jsonl"),
             "records": self.read_jsonl(memory_dir / "memory_records.jsonl"),
             "index_exists": (memory_dir / "memory_index.json").exists(),
         }
@@ -85,6 +87,7 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         paths = {
             "review_queue": memory_dir / "review_queue.jsonl",
             "review_decisions": memory_dir / "review_decisions.jsonl",
+            "approval_operations": memory_dir / "approval_operations.jsonl",
             "memory_records": memory_dir / "memory_records.jsonl",
             "memory_index": memory_dir / "memory_index.json",
             "entity_index": memory_dir / "entity_index.json",
@@ -404,34 +407,38 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 [item["record_id"] for item in default_search.json()["results"]],
             )
 
-    def assert_approval_failure_rolls_back_and_retries_once(self, tempdir: str, response):
-        self.assertEqual(response.status_code, 500)
-        self.assertNotIn("/tmp/secret approval failure", response.text)
-        self.assertNotIn("RuntimeError", response.text)
+    def expected_approval_ids(self, review_id: str):
+        return {
+            "operation_id": f"approval_{review_id}",
+            "record_id": f"mem_{review_id}_approved",
+            "decision_id": f"rd_{review_id}_approved",
+        }
 
+    def approval_index_count(self, tempdir: str):
+        path = Path(tempdir) / "memory" / "memory_index.json"
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8")).get("record_count")
+
+    def assert_completed_once(self, tempdir: str, review_id: str):
+        ids = self.expected_approval_ids(review_id)
         state = self.snapshot(tempdir)
-        self.assertEqual(len(state["queue"]), 1)
-        self.assertEqual(state["queue"][0]["review_status"], "pending")
-        self.assertFalse(state["decisions"])
-        self.assertFalse(state["records"])
+        self.assertEqual(state["queue"][0]["review_status"], "approved")
+        self.assertEqual([record["record_id"] for record in state["records"]], [ids["record_id"]])
+        self.assertEqual([decision["decision_id"] for decision in state["decisions"]], [ids["decision_id"]])
+        self.assertEqual(state["operations"][0]["operation_id"], ids["operation_id"])
+        self.assertEqual(state["operations"][0]["status"], "complete")
+        self.assertEqual(state["operations"][0]["stage"], "complete")
+        self.assertEqual(self.approval_index_count(tempdir), 1)
 
-        review_id = state["queue"][0]["review_id"]
-        retry = self.client.post(
-            f"/memory/review/{review_id}/approve",
-            json={"reviewed_by": "Oracle", "notes": "retry after rollback"},
+        retrieval = self.client.post(
+            "/memory/search",
+            json={"query": "memory governance lifecycle probe", "include_revoked": False},
         )
-        self.assertEqual(retry.status_code, 200)
-        retry_state = self.snapshot(tempdir)
-        self.assertEqual(retry_state["queue"][0]["review_status"], "approved")
-        self.assertEqual(len(retry_state["records"]), 1)
-        self.assertEqual(len(retry_state["decisions"]), 1)
+        self.assertEqual(retrieval.status_code, 200)
         self.assertEqual(
-            retry_state["queue"][0]["record_id"],
-            retry_state["records"][0]["record_id"],
-        )
-        self.assertEqual(
-            retry_state["decisions"][0]["record_id"],
-            retry_state["records"][0]["record_id"],
+            [result["record_id"] for result in retrieval.json()["results"]],
+            [ids["record_id"]],
         )
 
         repeated = self.client.post(
@@ -440,9 +447,22 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(repeated.status_code, 409)
         self.assertEqual(repeated.json()["detail"], "invalid_review_transition")
-        self.assertEqual(len(self.snapshot(tempdir)["records"]), 1)
 
-    def test_approval_memory_index_failure_rolls_back_and_retry_does_not_duplicate(self):
+    def assert_retry_completes_once(self, tempdir: str, review_id: str):
+        retry = self.client.post(
+            f"/memory/review/{review_id}/approve",
+            json={"reviewed_by": "Oracle", "notes": "retry approval"},
+        )
+        self.assertEqual(retry.status_code, 200)
+        self.assert_completed_once(tempdir, review_id)
+
+    def assert_forward_failure_then_retry(self, tempdir: str, review_id: str, response):
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("/tmp/secret approval failure", response.text)
+        self.assertNotIn("RuntimeError", response.text)
+        self.assert_retry_completes_once(tempdir, review_id)
+
+    def test_initial_approval_operation_failure_has_no_side_effect_and_retries(self):
         with tempfile.TemporaryDirectory() as tempdir:
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
@@ -452,30 +472,127 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 before = self.durable_snapshot(tempdir)
                 stack.enter_context(
                     patch.object(
-                        app.memory_taxonomy,
-                        "rebuild_index",
+                        app.memory_review_queue,
+                        "_save_approval_operations",
                         side_effect=RuntimeError("/tmp/secret approval failure"),
                     )
                 )
                 response = self.client.post(
                     f"/memory/review/{review_id}/approve",
-                    json={"reviewed_by": "Oracle", "notes": "fail index"},
+                    json={"reviewed_by": "Oracle", "notes": "operation fail"},
                 )
 
+            self.assertEqual(response.status_code, 500)
+            self.assertNotIn("/tmp/secret approval failure", response.text)
             self.assert_no_durable_change(tempdir, before)
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
-                self.assert_approval_failure_rolls_back_and_retries_once(tempdir, response)
+                self.assert_retry_completes_once(tempdir, review_id)
 
-    def test_approval_queue_failure_rolls_back_and_retry_does_not_duplicate(self):
+    def test_decision_write_failure_leaves_operation_only_and_retries(self):
         with tempfile.TemporaryDirectory() as tempdir:
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
 
                 review_id = self.create_review()
-                before = self.durable_snapshot(tempdir)
+                stack.enter_context(
+                    patch.object(
+                        app.memory_review_queue,
+                        "_save_decisions",
+                        side_effect=RuntimeError("/tmp/secret approval failure"),
+                    )
+                )
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "decision fail"},
+                )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "pending")
+                self.assertEqual(state["operations"][0]["stage"], "operation_started")
+                self.assertFalse(state["decisions"])
+                self.assertFalse(state["records"])
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
+
+    def test_memory_persistence_failure_leaves_decision_only_and_retries_without_duplicate_decision(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                stack.enter_context(
+                    patch.object(
+                        app.memory_review_queue,
+                        "_save_memory_records",
+                        side_effect=RuntimeError("/tmp/secret approval failure"),
+                    )
+                )
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "memory fail"},
+                )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                ids = self.expected_approval_ids(review_id)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "pending")
+                self.assertEqual([decision["decision_id"] for decision in state["decisions"]], [ids["decision_id"]])
+                self.assertFalse(state["records"])
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
+
+    def test_stage_persistence_failure_reconciles_actual_decision_state_on_retry(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                original = app.memory_review_queue._save_approval_operations
+                call_count = {"count": 0}
+
+                def fail_second_stage_write(rows):
+                    call_count["count"] += 1
+                    if call_count["count"] == 2:
+                        raise RuntimeError("/tmp/secret approval failure")
+                    return original(rows)
+
+                stack.enter_context(
+                    patch.object(
+                        app.memory_review_queue,
+                        "_save_approval_operations",
+                        side_effect=fail_second_stage_write,
+                    )
+                )
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "stage fail"},
+                )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                ids = self.expected_approval_ids(review_id)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["operations"][0]["stage"], "operation_started")
+                self.assertEqual([decision["decision_id"] for decision in state["decisions"]], [ids["decision_id"]])
+                self.assertFalse(state["records"])
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
+
+    def test_review_state_failure_leaves_memory_and_decision_recoverable(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
                 stack.enter_context(
                     patch.object(
                         app.memory_review_queue,
@@ -485,40 +602,131 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 )
                 response = self.client.post(
                     f"/memory/review/{review_id}/approve",
-                    json={"reviewed_by": "Oracle", "notes": "fail queue"},
+                    json={"reviewed_by": "Oracle", "notes": "queue fail"},
                 )
 
-            self.assert_no_durable_change(tempdir, before)
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
-                self.assert_approval_failure_rolls_back_and_retries_once(tempdir, response)
+                ids = self.expected_approval_ids(review_id)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "pending")
+                self.assertEqual([record["record_id"] for record in state["records"]], [ids["record_id"]])
+                self.assertEqual([decision["decision_id"] for decision in state["decisions"]], [ids["decision_id"]])
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
 
-    def test_approval_decision_failure_rolls_back_and_retry_does_not_duplicate(self):
+    def test_index_failure_rebuilds_on_retry_without_duplicate_memory_or_decision(self):
         with tempfile.TemporaryDirectory() as tempdir:
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
 
                 review_id = self.create_review()
-                before = self.durable_snapshot(tempdir)
                 stack.enter_context(
                     patch.object(
-                        app.memory_review_queue,
-                        "write_decision",
+                        app.memory_taxonomy,
+                        "rebuild_index",
                         side_effect=RuntimeError("/tmp/secret approval failure"),
                     )
                 )
                 response = self.client.post(
                     f"/memory/review/{review_id}/approve",
-                    json={"reviewed_by": "Oracle", "notes": "fail decision"},
+                    json={"reviewed_by": "Oracle", "notes": "index fail"},
                 )
 
-            self.assert_no_durable_change(tempdir, before)
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
-                self.assert_approval_failure_rolls_back_and_retries_once(tempdir, response)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "approved")
+                self.assertEqual(len(state["records"]), 1)
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
+
+    def test_completion_marker_failure_recovers_before_completed_state_409(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                original = app.memory_review_queue._mark_approval_operation
+
+                def fail_complete(operation, stage, status="incomplete", error=""):
+                    if stage == "complete":
+                        raise RuntimeError("/tmp/secret approval failure")
+                    return original(operation, stage, status=status, error=error)
+
+                stack.enter_context(
+                    patch.object(app.memory_review_queue, "_mark_approval_operation", side_effect=fail_complete)
+                )
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "completion fail"},
+                )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "approved")
+                self.assertEqual(state["operations"][0]["stage"], "memory_indexed")
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
+
+    def test_literal_approved_review_without_decision_or_memory_recovers_through_approval_endpoint(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                queue = app.memory_review_queue.load_queue(include_closed=True)
+                queue[0]["review_status"] = "approved"
+                queue[0]["reviewed_at"] = app.memory_review_queue.utc_now()
+                queue[0]["reviewed_by"] = "Oracle"
+                queue[0]["notes"] = "legacy incomplete approval"
+                app.memory_review_queue.save_queue(queue)
+                self.assertFalse(self.read_jsonl(Path(tempdir) / "memory" / "review_decisions.jsonl"))
+                self.assertFalse((Path(tempdir) / "memory" / "memory_records.jsonl").exists())
+
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "recover literal"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                self.assert_completed_once(tempdir, review_id)
+
+    def test_concurrent_same_review_approval_does_not_duplicate_effects(self):
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+
+                def approve():
+                    return self.client.post(
+                        f"/memory/review/{review_id}/approve",
+                        json={"reviewed_by": "Oracle", "notes": "concurrent"},
+                    )
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    responses = list(executor.map(lambda _: approve(), range(2)))
+
+                statuses = sorted(response.status_code for response in responses)
+                self.assertIn(statuses, ([200, 200], [200, 409]))
+                state = self.snapshot(tempdir)
+                self.assertEqual(len(state["records"]), 1)
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assertEqual(len(state["operations"]), 1)
+                self.assertEqual(state["queue"][0]["review_status"], "approved")
+                self.assertEqual(self.approval_index_count(tempdir), 1)
 
     def test_consolidation_dry_run_does_not_create_or_change_durable_files(self):
         with tempfile.TemporaryDirectory() as tempdir:
