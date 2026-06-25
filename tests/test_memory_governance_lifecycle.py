@@ -63,6 +63,11 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
             "risk_level": "low",
         }
 
+    def explicit_target_candidate_record(self, record_id: str = "candidate_target"):
+        candidate = self.candidate_record()
+        candidate["record_id"] = record_id
+        return candidate
+
     def read_jsonl(self, path: Path):
         if not path.exists():
             return []
@@ -112,6 +117,16 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         response = self.client.post(
             "/memory/review/enqueue",
             json={"candidate_record": deepcopy(self.candidate_record())},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "success")
+        return payload["review"]["review_id"]
+
+    def create_explicit_target_review(self, record_id: str = "candidate_target"):
+        response = self.client.post(
+            "/memory/review/enqueue",
+            json={"candidate_record": deepcopy(self.explicit_target_candidate_record(record_id))},
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -653,6 +668,81 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
                 self.assert_retry_completes_once(tempdir, review_id)
+
+    def test_missing_explicit_candidate_target_stops_before_approval_effects(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_explicit_target_review()
+                before = self.durable_snapshot(tempdir)
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "missing target"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"], "approval_state_conflict")
+            self.assertNotIn("candidate_target", response.text)
+            self.assertNotIn(str(Path(tempdir)), response.text)
+            self.assert_no_durable_change(tempdir, before)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertFalse(state["operations"])
+                self.assertFalse(state["decisions"])
+                self.assertFalse(state["records"])
+
+    def test_partial_explicit_target_approval_state_does_not_advance_when_target_remains_missing(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_explicit_target_review()
+                item = app.memory_review_queue.load_queue(include_closed=True)[0]
+                operation = self.approval_operation(
+                    review_id,
+                    item,
+                    stage="decision_recorded",
+                    reviewed_by="ReviewerA",
+                )
+                ids = {
+                    "operation_id": operation["operation_id"],
+                    "record_id": operation["intended_memory_record_id"],
+                    "decision_id": operation["intended_decision_id"],
+                }
+                decision = self.approval_decision(
+                    review_id,
+                    ids,
+                    reviewed_by="ReviewerA",
+                    notes="existing partial approval",
+                )
+                self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [decision])
+
+                before = self.durable_snapshot(tempdir)
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerB", "notes": "retry missing target"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"], "approval_state_conflict")
+            self.assertNotIn("candidate_target", response.text)
+            self.assert_no_durable_change(tempdir, before)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertEqual(len(state["operations"]), 1)
+                self.assertEqual(state["operations"][0]["stage"], "decision_recorded")
+                self.assertEqual(state["operations"][0]["reviewed_by"], "ReviewerA")
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assertEqual(state["decisions"][0]["reviewed_by"], "ReviewerA")
+                self.assertFalse(state["records"])
 
     def test_decision_write_failure_leaves_operation_only_and_retries(self):
         with tempfile.TemporaryDirectory() as tempdir:
