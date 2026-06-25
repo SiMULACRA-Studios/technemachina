@@ -159,6 +159,26 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         self.assertEqual(payload["status"], "success")
         return payload["review"]["review_id"], target_record["record_id"]
 
+    def create_matching_target(self, *, reviewed_by: str = "ReviewerA", **overrides):
+        target_payload = self.candidate_record()
+        target_payload["created_by"] = reviewed_by
+        target_payload.update(overrides)
+        target = self.client.post("/memory/record", json=target_payload)
+        self.assertEqual(target.status_code, 200)
+        return target.json()["record"]
+
+    def create_review_for_target(self, record_id: str):
+        candidate = self.candidate_record()
+        candidate["record_id"] = record_id
+        response = self.client.post(
+            "/memory/review/enqueue",
+            json={"candidate_record": deepcopy(candidate)},
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "success")
+        return payload["review"]["review_id"]
+
     def create_memory_record(self, **overrides):
         payload = {
             "record_type": "project_fact",
@@ -541,6 +561,15 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         return [result["record_id"] for result in response.json()["results"]]
+
+    def assert_review_targets(self, review_id: str, record_id: str):
+        item = app.memory_review_queue.get_review_item(review_id)
+        self.assertEqual(item["record_id"], record_id)
+        self.assertEqual(item["candidate_record"]["record_id"], record_id)
+        self.assertEqual(
+            app.memory_review_queue._stable_approval_ids(review_id, item)["memory_record_id"],
+            record_id,
+        )
 
     def assert_approval_conflict_no_mutation(self, tempdir: str, review_id: str, before: dict):
         before_visible = self.visible_active_record_ids(tempdir)
@@ -946,6 +975,316 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                     expected_reviewer="ReviewerA",
                     repeat_reviewer="ReviewerA",
                 )
+
+    def test_public_record_id_retarget_to_missing_target_is_coherent_and_rejects_before_approval_effects(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                target_a = self.create_matching_target()
+                review_id = self.create_review_for_target(target_a["record_id"])
+                edit = self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"record_id": "missing_target_b"},
+                        "reviewed_by": "Editor",
+                        "notes": "retarget to missing B",
+                    },
+                )
+                self.assertEqual(edit.status_code, 200)
+                self.assert_review_targets(review_id, "missing_target_b")
+
+                before = self.durable_snapshot(tempdir)
+                before_state = self.snapshot(tempdir)
+                before_retrieval = self.retrieval_record_ids()
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "approve missing B"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"], "approval_state_conflict")
+            self.assertNotIn("missing_target_b", response.text)
+            self.assert_no_durable_change(tempdir, before)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                self.assertEqual(self.snapshot(tempdir), before_state)
+                self.assertEqual(self.retrieval_record_ids(), before_retrieval)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "edited")
+                self.assertFalse(state["operations"])
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assertEqual(state["decisions"][0]["decision"], "edited")
+                self.assertEqual([record["record_id"] for record in state["records"]], [target_a["record_id"]])
+
+    def test_public_record_id_retarget_to_conflicting_target_rejects_without_approval_effects(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                target_a = self.create_matching_target()
+                target_b = self.create_matching_target(title="Conflicting explicit target title")
+                review_id = self.create_review_for_target(target_a["record_id"])
+                edit = self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"record_id": target_b["record_id"]},
+                        "reviewed_by": "Editor",
+                        "notes": "retarget to conflicting B",
+                    },
+                )
+                self.assertEqual(edit.status_code, 200)
+                self.assert_review_targets(review_id, target_b["record_id"])
+
+                before = self.durable_snapshot(tempdir)
+                before_state = self.snapshot(tempdir)
+                before_retrieval = self.retrieval_record_ids()
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "approve conflicting B"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"], "approval_state_conflict")
+            self.assertNotIn(target_b["record_id"], response.text)
+            self.assert_no_durable_change(tempdir, before)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                self.assertEqual(self.snapshot(tempdir), before_state)
+                self.assertEqual(self.retrieval_record_ids(), before_retrieval)
+                state = self.snapshot(tempdir)
+                self.assertFalse(state["operations"])
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assertEqual(
+                    sorted(record["record_id"] for record in state["records"]),
+                    sorted([target_a["record_id"], target_b["record_id"]]),
+                )
+
+    def test_public_record_id_retarget_to_valid_target_approves_only_new_target(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                target_a = self.create_matching_target(
+                    title="Old unrelated target A",
+                    summary="Old unrelated target summary.",
+                    body="Old unrelated target body.",
+                    source_ref="audit:item7:old-target-a",
+                    provenance="Old unrelated target provenance.",
+                )
+                target_b = self.create_matching_target()
+                review_id = self.create_review_for_target(target_a["record_id"])
+                edit = self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"record_id": target_b["record_id"]},
+                        "reviewed_by": "Editor",
+                        "notes": "retarget to valid B",
+                    },
+                )
+                self.assertEqual(edit.status_code, 200)
+                self.assert_review_targets(review_id, target_b["record_id"])
+                before_records = {
+                    record["record_id"]: record
+                    for record in self.snapshot(tempdir)["records"]
+                }
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "approve valid B"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["record_id"], target_b["record_id"])
+                self.assertEqual(state["queue"][0]["candidate_record"]["record_id"], target_b["record_id"])
+                self.assertEqual(state["queue"][0]["review_status"], "approved")
+                self.assertEqual(len(state["operations"]), 1)
+                self.assertEqual(state["operations"][0]["intended_memory_record_id"], target_b["record_id"])
+                self.assertEqual(state["operations"][0]["reviewed_by"], "ReviewerA")
+                self.assertEqual(len(state["decisions"]), 2)
+                self.assertEqual(state["decisions"][-1]["decision"], "approved")
+                self.assertEqual(state["decisions"][-1]["record_id"], target_b["record_id"])
+                records = {record["record_id"]: record for record in state["records"]}
+                self.assertEqual(records[target_a["record_id"]], before_records[target_a["record_id"]])
+                self.assertEqual(records[target_b["record_id"]]["status"], "active")
+                self.assertEqual(records[target_b["record_id"]]["review_state"], "oracle_approved")
+                self.assertEqual(self.approval_index_count(tempdir), 2)
+                retrieval_ids = self.retrieval_record_ids()
+                self.assertEqual(retrieval_ids[0], target_b["record_id"])
+                self.assertIn(target_a["record_id"], retrieval_ids)
+
+                repeated = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "repeat valid B"},
+                )
+                self.assertEqual(repeated.status_code, 409)
+                self.assertEqual(repeated.json()["detail"], "invalid_review_transition")
+
+    def test_public_non_record_id_edit_preserves_target_coherence(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                target = self.create_matching_target()
+                review_id = self.create_review_for_target(target["record_id"])
+                response = self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"title": "Edited memory probe"},
+                        "reviewed_by": "Editor",
+                        "notes": "ordinary edit",
+                    },
+                )
+
+            self.assertEqual(response.status_code, 200)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                self.assert_review_targets(review_id, target["record_id"])
+                item = app.memory_review_queue.get_review_item(review_id)
+                self.assertEqual(item["candidate_record"]["title"], "Edited memory probe")
+
+    def test_record_id_empty_edits_are_rejected_without_mutation(self):
+        cases = [None, "", "   "]
+        for value in cases:
+            with self.subTest(value=repr(value)):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+                        target = self.create_matching_target()
+                        review_id = self.create_review_for_target(target["record_id"])
+                        before = self.durable_snapshot(tempdir)
+                        response = self.client.post(
+                            f"/memory/review/{review_id}/edit",
+                            json={
+                                "patch": {"record_id": value},
+                                "reviewed_by": "Editor",
+                                "notes": "invalid record id edit",
+                            },
+                        )
+
+                    self.assertEqual(response.status_code, 409)
+                    self.assertEqual(response.json()["detail"], "invalid_review_transition")
+                    self.assert_no_durable_change(tempdir, before)
+
+    def test_pre_existing_mismatched_review_targets_reject_before_approval_effects(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                target = self.create_matching_target()
+                review_id = self.create_review_for_target(target["record_id"])
+                queue = app.memory_review_queue.load_queue(include_closed=True)
+                queue[0]["candidate_record"]["record_id"] = "candidate_B"
+                app.memory_review_queue.save_queue(queue)
+                before = self.durable_snapshot(tempdir)
+                before_state = self.snapshot(tempdir)
+                before_retrieval = self.retrieval_record_ids()
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "approve mismatched state"},
+                )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"], "approval_state_conflict")
+            self.assertNotIn("candidate_B", response.text)
+            self.assert_no_durable_change(tempdir, before)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                self.assertEqual(self.snapshot(tempdir), before_state)
+                self.assertEqual(self.retrieval_record_ids(), before_retrieval)
+                state = self.snapshot(tempdir)
+                self.assertFalse(state["operations"])
+                self.assertEqual(len(state["decisions"]), 0)
+
+    def test_record_id_edit_after_incomplete_operation_conflicts_without_retargeting_operation(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                target_a = self.create_matching_target()
+                target_b = self.create_matching_target()
+                review_id = self.create_review_for_target(target_a["record_id"])
+                item = app.memory_review_queue.get_review_item(review_id)
+                operation = self.approval_operation(
+                    review_id,
+                    item,
+                    stage="operation_started",
+                    reviewed_by="ReviewerA",
+                )
+                self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                edit = self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"record_id": target_b["record_id"]},
+                        "reviewed_by": "Editor",
+                        "notes": "retarget after operation",
+                    },
+                )
+                self.assertEqual(edit.status_code, 409)
+                self.assertEqual(edit.json()["detail"], "invalid_review_transition")
+                self.assert_review_targets(review_id, target_a["record_id"])
+                before = self.durable_snapshot(tempdir)
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerB", "notes": "recover original operation"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["operations"][0]["intended_memory_record_id"], target_a["record_id"])
+                self.assertEqual(state["operations"][0]["reviewed_by"], "ReviewerA")
+                self.assertEqual(state["queue"][0]["record_id"], target_a["record_id"])
+                self.assertEqual(state["decisions"][0]["record_id"], target_a["record_id"])
+                self.assertEqual([record["record_id"] for record in state["records"]], [target_a["record_id"], target_b["record_id"]])
+                self.assertNotEqual(self.durable_snapshot(tempdir), before)
+
+    def test_reject_and_defer_after_retarget_record_current_coherent_id(self):
+        for action in ("reject", "defer"):
+            with self.subTest(action=action):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+                        target_a = self.create_matching_target()
+                        target_b = self.create_matching_target()
+                        review_id = self.create_review_for_target(target_a["record_id"])
+                        edit = self.client.post(
+                            f"/memory/review/{review_id}/edit",
+                            json={
+                                "patch": {"record_id": target_b["record_id"]},
+                                "reviewed_by": "Editor",
+                                "notes": f"retarget before {action}",
+                            },
+                        )
+                        self.assertEqual(edit.status_code, 200)
+                        response = self.client.post(
+                            f"/memory/review/{review_id}/{action}",
+                            json={"reviewed_by": "ReviewerA", "notes": action},
+                        )
+
+                    self.assertEqual(response.status_code, 200)
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+                        state = self.snapshot(tempdir)
+                        self.assertEqual(state["queue"][0]["record_id"], target_b["record_id"])
+                        self.assertEqual(state["queue"][0]["candidate_record"]["record_id"], target_b["record_id"])
+                        self.assertEqual(state["decisions"][-1]["decision"], f"{action}ed" if action == "reject" else "deferred")
+                        self.assertEqual(state["decisions"][-1]["record_id"], target_b["record_id"])
 
     def test_decision_write_failure_leaves_operation_only_and_retries(self):
         with tempfile.TemporaryDirectory() as tempdir:

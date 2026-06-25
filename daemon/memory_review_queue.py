@@ -181,6 +181,13 @@ def _approval_conflict():
     raise ApprovalStateConflict("approval_state_conflict")
 
 
+def _validate_review_record_id_coherence(item: dict):
+    candidate = item.get("candidate_record", {}) or {}
+    candidate_record_id = candidate.get("record_id")
+    if candidate_record_id and item.get("record_id") != candidate_record_id:
+        _approval_conflict()
+
+
 def _normalize_requested_reviewer(reviewed_by: str) -> str:
     return (reviewed_by or "Oracle").strip() or "Oracle"
 
@@ -366,6 +373,7 @@ def _upsert_approval_operation(operation: dict):
 
 
 def _ensure_approval_operation(review_id: str, item: dict, reviewed_by: str, notes: str) -> dict:
+    _validate_review_record_id_coherence(item)
     existing = _find_approval_operation(review_id)
     now = utc_now()
 
@@ -887,6 +895,12 @@ def edit_review(review_id: str, patch: dict, reviewed_by: str = "Oracle", notes:
         original_candidate = dict(candidate)
 
         for key, value in patch.items():
+            if key == "record_id":
+                if not isinstance(value, str) or not value.strip() or value != value.strip():
+                    raise ValueError("Invalid record_id edit")
+                candidate[key] = value
+                item["record_id"] = value
+                continue
             candidate[key] = value
 
         item["candidate_record"] = candidate
