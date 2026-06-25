@@ -340,6 +340,9 @@ def defer_review(review_id: str, reviewed_by: str = "Oracle", notes: str = ""):
     if not item:
         return None
 
+    if item.get("review_status") not in {"pending", "edited", "deferred"}:
+        raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
+
     item["review_status"] = "deferred"
     item["reviewed_at"] = utc_now()
     item["reviewed_by"] = reviewed_by
@@ -366,6 +369,9 @@ def edit_review(review_id: str, patch: dict, reviewed_by: str = "Oracle", notes:
 
     if not item:
         return None
+
+    if item.get("review_status") not in {"pending", "edited", "deferred"}:
+        raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
     candidate = item.get("candidate_record", {})
     original_candidate = dict(candidate)
