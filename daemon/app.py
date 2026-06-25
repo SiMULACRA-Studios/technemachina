@@ -906,6 +906,18 @@ Keep the answer bounded, concise, and project-aware.
 
 @app.post("/chat")
 async def handle_chat(req: ChatRequest):
+    risk_report = classify_text(req.prompt)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Chat request blocked by risk policy.",
+            },
+        )
+
     requested_thread_id = getattr(req, "thread_id", "") or thread_registry.get_active_thread_id()
     thread_id = thread_registry.safe_thread_id(requested_thread_id)
 
@@ -1076,6 +1088,18 @@ async def get_thread(thread_id: str):
 
 @app.post("/explain")
 async def handle_explain(req: ToolRequest):
+    risk_report = classify_text(req.code)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Explain request blocked by risk policy.",
+            },
+        )
+
     prompt = tools.format_explain_prompt(req.code)
     reply = ai.query_model(prompt, req.model)
     return {"response": reply}
