@@ -1094,7 +1094,20 @@ async def restore_thread_endpoint(thread_id: str):
 
 @app.get("/threads/{thread_id}")
 async def get_thread(thread_id: str):
-    thread = _get_thread_or_404(thread_id)
+    if not thread_registry.REGISTRY_PATH.exists():
+        if thread_id != thread_registry.DEFAULT_THREAD_ID:
+            raise HTTPException(status_code=404, detail="thread_not_found")
+
+        thread = thread_registry.ensure_thread(thread_id=thread_registry.DEFAULT_THREAD_ID)
+    else:
+        thread = thread_registry.get_thread(thread_id)
+
+        if not thread and thread_id == thread_registry.DEFAULT_THREAD_ID:
+            thread = thread_registry.ensure_thread(thread_id=thread_registry.DEFAULT_THREAD_ID)
+
+    if not thread:
+        raise HTTPException(status_code=404, detail="thread_not_found")
+
     messages = thread_context.load_messages(thread_id=thread_id, limit=40)
 
     return {

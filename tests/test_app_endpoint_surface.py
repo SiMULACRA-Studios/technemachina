@@ -680,6 +680,107 @@ class AppEndpointSurfaceTests(unittest.TestCase):
             self.assertEqual(payload["messages"][0]["content"], "hello")
             self.assertEqual(self.read_thread_registry(tempdir), original_registry)
 
+    def test_get_default_thread_bootstraps_fresh_zero_activity_storage(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            registry_path = self.thread_registry_path(tempdir)
+
+            self.assertFalse(registry_path.exists())
+            self.assertFalse(self.thread_message_path(tempdir, "default").exists())
+
+            with ExitStack() as stack:
+                for manager in self.isolated_thread_storage(tempdir):
+                    stack.enter_context(manager)
+
+                response = self.client.get("/threads/default")
+
+            self.assertEqual(response.status_code, 200)
+
+            payload = response.json()
+            registry = self.read_thread_registry(tempdir)
+
+            self.assertEqual(payload["messages"], [])
+            self.assertEqual(payload["thread"]["thread_id"], "default")
+            self.assertEqual(payload["thread"]["title"], "Default Thread")
+            self.assertEqual(payload["thread"]["message_count"], 0)
+            self.assertEqual(payload["thread"]["preview"], "")
+            self.assertFalse(payload["thread"]["archived"])
+            self.assertEqual(registry["active_thread_id"], "default")
+            self.assertEqual(registry["threads"]["default"], payload["thread"])
+            self.assertEqual(list(registry["threads"]), ["default"])
+            self.assertTrue(registry_path.exists())
+            self.assertFalse(self.thread_message_path(tempdir, "default").exists())
+
+    def test_get_existing_default_thread_does_not_recreate_or_change_active_thread(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            default_thread = {
+                "thread_id": "default",
+                "title": "Existing Default",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "updated_at": "2026-01-02T00:00:00+00:00",
+                "message_count": 0,
+                "preview": "existing",
+                "archived": False,
+            }
+            active_thread = self.sample_threads()["active"]
+            original_registry = self.write_thread_registry(
+                tempdir,
+                active_thread_id="active",
+                threads={
+                    "active": active_thread,
+                    "default": default_thread,
+                },
+            )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_thread_storage(tempdir):
+                    stack.enter_context(manager)
+
+                response = self.client.get("/threads/default")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["thread"], default_thread)
+            self.assertEqual(response.json()["messages"], [])
+            self.assertEqual(self.read_thread_registry(tempdir), original_registry)
+            self.assertEqual(self.read_thread_registry(tempdir)["active_thread_id"], "active")
+            self.assertEqual(
+                list(self.read_thread_registry(tempdir)["threads"]),
+                ["active", "default"],
+            )
+
+    def test_get_default_thread_with_other_threads_creates_only_default(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            active_thread = self.sample_threads()["active"]
+            inactive_thread = self.sample_threads()["inactive"]
+            original_registry = self.write_thread_registry(
+                tempdir,
+                active_thread_id="active",
+                threads={
+                    "active": active_thread,
+                    "inactive": inactive_thread,
+                },
+            )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_thread_storage(tempdir):
+                    stack.enter_context(manager)
+
+                response = self.client.get("/threads/default")
+
+            self.assertEqual(response.status_code, 200)
+
+            payload = response.json()
+            registry = self.read_thread_registry(tempdir)
+
+            self.assertEqual(payload["messages"], [])
+            self.assertEqual(payload["thread"]["thread_id"], "default")
+            self.assertEqual(payload["thread"]["title"], "Default Thread")
+            self.assertEqual(registry["active_thread_id"], "default")
+            self.assertEqual(registry["threads"]["active"], original_registry["threads"]["active"])
+            self.assertEqual(registry["threads"]["inactive"], original_registry["threads"]["inactive"])
+            self.assertEqual(registry["threads"]["default"], payload["thread"])
+            self.assertEqual(list(registry["threads"]), ["active", "inactive", "default"])
+            self.assertFalse(self.thread_message_path(tempdir, "default").exists())
+
     def test_rename_unknown_thread_returns_404_without_creation_or_active_thread_change(self):
         with tempfile.TemporaryDirectory() as tempdir:
             original_registry = self.write_thread_registry(tempdir)
@@ -746,6 +847,42 @@ class AppEndpointSurfaceTests(unittest.TestCase):
                     self.assertEqual(self.read_thread_registry(tempdir), original_registry)
                     self.assertNotIn("missing", self.read_thread_registry(tempdir)["threads"])
                     self.assertFalse(self.thread_message_path(tempdir, "missing").exists())
+
+    def test_missing_default_mutations_do_not_bootstrap_default_thread(self):
+        cases = [
+            (
+                "rename",
+                lambda: self.client.post(
+                    "/threads/default/rename",
+                    json={"title": "Synthetic default"},
+                ),
+            ),
+            ("archive", lambda: self.client.post("/threads/default/archive")),
+            ("restore", lambda: self.client.post("/threads/default/restore")),
+        ]
+
+        for action, request in cases:
+            with self.subTest(action=action):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    original_registry = self.write_thread_registry(
+                        tempdir,
+                        active_thread_id="active",
+                        threads={
+                            "active": self.sample_threads()["active"],
+                        },
+                    )
+
+                    with ExitStack() as stack:
+                        for manager in self.isolated_thread_storage(tempdir):
+                            stack.enter_context(manager)
+
+                        response = request()
+
+                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(response.json()["detail"], "thread_not_found")
+                    self.assertEqual(self.read_thread_registry(tempdir), original_registry)
+                    self.assertNotIn("default", self.read_thread_registry(tempdir)["threads"])
+                    self.assertFalse(self.thread_message_path(tempdir, "default").exists())
 
     def test_archive_existing_threads_preserves_active_and_default_fallbacks(self):
         with tempfile.TemporaryDirectory() as tempdir:
