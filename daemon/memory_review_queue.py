@@ -279,8 +279,8 @@ def _approval_memory_payload(operation: dict, item: dict, reviewed_by: str) -> d
             f"Approved through review queue item {item.get('review_id')}.",
         )).strip(),
         "confidence": candidate.get("confidence", "medium"),
-        "status": "active",
-        "review_state": "oracle_approved",
+        "status": "draft",
+        "review_state": "needs_review",
         "expires_at": candidate.get("expires_at"),
         "risk_level": candidate.get("risk_level", "low"),
         "created_at": now,
@@ -318,6 +318,23 @@ def _ensure_approval_memory(operation: dict, item: dict, reviewed_by: str) -> di
     records.append(payload)
     _save_memory_records(records)
     return payload
+
+
+def _promote_approval_memory(operation: dict) -> dict:
+    records = _load_all_memory_records()
+    record_id = operation.get("intended_memory_record_id")
+
+    for record in records:
+        if record.get("record_id") == record_id:
+            if record.get("status") != "active":
+                record["status"] = "active"
+                record["review_state"] = "oracle_approved"
+                record["updated_at"] = utc_now()
+                record["hash"] = _memory_hash(record)
+                _save_memory_records(records)
+            return record
+
+    raise ValueError("approval_memory_missing")
 
 
 def _load_all_decisions() -> list[dict]:
@@ -384,6 +401,7 @@ def _approval_effects_complete(item: dict, operation: dict) -> bool:
         and bool(decision)
         and bool(record)
         and record.get("status") == "active"
+        and record.get("review_state") == "oracle_approved"
         and _index_contains_active_record(record.get("record_id"))
         and operation.get("status") == "complete"
     )
@@ -548,7 +566,7 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
         operation = _mark_approval_operation(operation, "decision_recorded")
 
         created_record = _ensure_approval_memory(operation, item, reviewed_by)
-        operation = _mark_approval_operation(operation, "memory_active")
+        operation = _mark_approval_operation(operation, "memory_draft")
 
         item = get_review_item(review_id)
         if not item:
@@ -562,6 +580,9 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
 
         update_review_item(review_id, item)
         operation = _mark_approval_operation(operation, "review_approved")
+
+        created_record = _promote_approval_memory(operation)
+        operation = _mark_approval_operation(operation, "memory_active")
 
         memory_taxonomy.rebuild_index()
         operation = _mark_approval_operation(operation, "memory_indexed")

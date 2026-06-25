@@ -326,7 +326,7 @@ def consolidate_memory(dry_run: bool = True, limit: int = 50):
         ensure_worker_store()
         records = memory_taxonomy.load_records(include_revoked=True)
 
-    active_records = [r for r in records if r.get("status") != "revoked"]
+    active_records = [r for r in records if r.get("status") == "active"]
 
     if dry_run:
         entity_index = build_entity_index(active_records)

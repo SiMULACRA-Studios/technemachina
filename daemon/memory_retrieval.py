@@ -286,6 +286,8 @@ def search_memory(
     filtered = []
 
     for record in records:
+        if record.get("status") != "active":
+            continue
         if record_type and record.get("record_type") != record_type:
             continue
         if layer and record.get("layer") != layer:

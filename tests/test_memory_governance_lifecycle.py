@@ -420,6 +420,13 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
             return None
         return json.loads(path.read_text(encoding="utf-8")).get("record_count")
 
+    def write_jsonl(self, path: Path, rows: list[dict]):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + ("\n" if rows else ""),
+            encoding="utf-8",
+        )
+
     def assert_completed_once(self, tempdir: str, review_id: str):
         ids = self.expected_approval_ids(review_id)
         state = self.snapshot(tempdir)
@@ -461,6 +468,46 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         self.assertNotIn("/tmp/secret approval failure", response.text)
         self.assertNotIn("RuntimeError", response.text)
         self.assert_retry_completes_once(tempdir, review_id)
+
+    def assert_draft_memory_hidden(self, tempdir: str, review_id: str):
+        ids = self.expected_approval_ids(review_id)
+        state = self.snapshot(tempdir)
+        self.assertEqual([record["record_id"] for record in state["records"]], [ids["record_id"]])
+        self.assertEqual(state["records"][0]["status"], "draft")
+        self.assertEqual(state["records"][0]["review_state"], "needs_review")
+        self.assertEqual(self.approval_index_count(tempdir), 0)
+
+        default_records = self.client.get("/memory/records")
+        self.assertEqual(default_records.status_code, 200)
+        self.assertNotIn(
+            ids["record_id"],
+            [record["record_id"] for record in default_records.json()["records"]],
+        )
+
+        direct_records = self.client.get("/memory/records", params={"include_revoked": True})
+        self.assertEqual(direct_records.status_code, 200)
+        direct = {
+            record["record_id"]: record
+            for record in direct_records.json()["records"]
+        }
+        self.assertEqual(direct[ids["record_id"]]["status"], "draft")
+
+        search = self.client.post(
+            "/memory/search",
+            json={"query": "memory governance lifecycle probe", "include_revoked": True},
+        )
+        self.assertEqual(search.status_code, 200)
+        self.assertNotIn(
+            ids["record_id"],
+            [result["record_id"] for result in search.json()["results"]],
+        )
+
+        dry_run = self.client.post(
+            "/memory/consolidate",
+            json={"dry_run": True, "limit": 20},
+        )
+        self.assertEqual(dry_run.status_code, 200)
+        self.assertEqual(dry_run.json()["record_count"], 0)
 
     def test_initial_approval_operation_failure_has_no_side_effect_and_retries(self):
         with tempfile.TemporaryDirectory() as tempdir:
@@ -612,7 +659,47 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 state = self.snapshot(tempdir)
                 self.assertEqual(state["queue"][0]["review_status"], "pending")
                 self.assertEqual([record["record_id"] for record in state["records"]], [ids["record_id"]])
+                self.assertEqual(state["records"][0]["status"], "draft")
+                self.assertEqual(state["records"][0]["review_state"], "needs_review")
                 self.assertEqual([decision["decision_id"] for decision in state["decisions"]], [ids["decision_id"]])
+                self.assert_draft_memory_hidden(tempdir, review_id)
+                self.assert_forward_failure_then_retry(tempdir, review_id, response)
+
+    def test_active_promotion_failure_leaves_draft_until_retry_promotes_same_memory(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                original = app.memory_review_queue._save_memory_records
+                call_count = {"count": 0}
+
+                def fail_second_memory_save(rows):
+                    call_count["count"] += 1
+                    if call_count["count"] == 2:
+                        raise RuntimeError("/tmp/secret approval failure")
+                    return original(rows)
+
+                stack.enter_context(
+                    patch.object(
+                        app.memory_review_queue,
+                        "_save_memory_records",
+                        side_effect=fail_second_memory_save,
+                    )
+                )
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "promotion fail"},
+                )
+
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                state = self.snapshot(tempdir)
+                self.assertEqual(state["queue"][0]["review_status"], "approved")
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assert_draft_memory_hidden(tempdir, review_id)
                 self.assert_forward_failure_then_retry(tempdir, review_id, response)
 
     def test_index_failure_rebuilds_on_retry_without_duplicate_memory_or_decision(self):
@@ -698,6 +785,113 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
                     stack.enter_context(manager)
+                self.assert_completed_once(tempdir, review_id)
+
+    def test_literal_pending_review_with_decision_and_active_memory_recovers_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                ids = self.expected_approval_ids(review_id)
+                queue = app.memory_review_queue.load_queue(include_closed=True)
+                item = queue[0]
+                operation = app.memory_review_queue._ensure_approval_operation(
+                    review_id,
+                    item,
+                    reviewed_by="Oracle",
+                    notes="literal contradiction",
+                )
+                operation = app.memory_review_queue._mark_approval_operation(operation, "memory_draft")
+                decision = {
+                    "decision_id": ids["decision_id"],
+                    "review_id": review_id,
+                    "decision": "approved",
+                    "reviewed_by": "Oracle",
+                    "reviewed_at": app.memory_review_queue.utc_now(),
+                    "notes": "literal contradiction",
+                    "record_id": ids["record_id"],
+                    "queue_version": app.memory_review_queue.REVIEW_QUEUE_VERSION,
+                    "policy_version": app.memory_review_queue.POLICY_VERSION,
+                    "operation_id": ids["operation_id"],
+                }
+                self.write_jsonl(Path(tempdir) / "memory" / "review_decisions.jsonl", [decision])
+                memory = app.memory_review_queue._approval_memory_payload(operation, item, "Oracle")
+                memory["status"] = "active"
+                memory["review_state"] = "oracle_approved"
+                memory["hash"] = app.memory_review_queue._memory_hash(memory)
+                self.write_jsonl(Path(tempdir) / "memory" / "memory_records.jsonl", [memory])
+                app.memory_taxonomy.rebuild_index()
+
+                before_search = self.client.post(
+                    "/memory/search",
+                    json={"query": "memory governance lifecycle probe", "include_revoked": False},
+                )
+                self.assertEqual(
+                    [result["record_id"] for result in before_search.json()["results"]],
+                    [ids["record_id"]],
+                )
+
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "Oracle", "notes": "recover literal contradiction"},
+                )
+
+            self.assertEqual(response.status_code, 200)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+                self.assert_completed_once(tempdir, review_id)
+
+    def test_concurrent_recovery_of_literal_contradiction_does_not_duplicate_effects(self):
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                ids = self.expected_approval_ids(review_id)
+                item = app.memory_review_queue.load_queue(include_closed=True)[0]
+                operation = app.memory_review_queue._ensure_approval_operation(
+                    review_id,
+                    item,
+                    reviewed_by="Oracle",
+                    notes="literal contradiction",
+                )
+                app.memory_review_queue._mark_approval_operation(operation, "memory_draft")
+                self.write_jsonl(Path(tempdir) / "memory" / "review_decisions.jsonl", [{
+                    "decision_id": ids["decision_id"],
+                    "review_id": review_id,
+                    "decision": "approved",
+                    "reviewed_by": "Oracle",
+                    "reviewed_at": app.memory_review_queue.utc_now(),
+                    "notes": "literal contradiction",
+                    "record_id": ids["record_id"],
+                    "queue_version": app.memory_review_queue.REVIEW_QUEUE_VERSION,
+                    "policy_version": app.memory_review_queue.POLICY_VERSION,
+                    "operation_id": ids["operation_id"],
+                }])
+                memory = app.memory_review_queue._approval_memory_payload(operation, item, "Oracle")
+                memory["status"] = "active"
+                memory["review_state"] = "oracle_approved"
+                memory["hash"] = app.memory_review_queue._memory_hash(memory)
+                self.write_jsonl(Path(tempdir) / "memory" / "memory_records.jsonl", [memory])
+                app.memory_taxonomy.rebuild_index()
+
+                def approve():
+                    return self.client.post(
+                        f"/memory/review/{review_id}/approve",
+                        json={"reviewed_by": "Oracle", "notes": "concurrent recovery"},
+                    )
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    responses = list(executor.map(lambda _: approve(), range(2)))
+
+                statuses = sorted(response.status_code for response in responses)
+                self.assertIn(statuses, ([200, 200], [200, 409]))
                 self.assert_completed_once(tempdir, review_id)
 
     def test_concurrent_same_review_approval_does_not_duplicate_effects(self):
