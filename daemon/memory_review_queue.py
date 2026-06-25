@@ -107,6 +107,33 @@ def write_decision(review_id: str, decision: str, reviewed_by: str = "Oracle", n
     return entry
 
 
+def _snapshot_files(paths: list[Path]) -> dict[Path, bytes | None]:
+    return {
+        path: path.read_bytes() if path.exists() else None
+        for path in paths
+    }
+
+
+def _restore_file_snapshot(snapshot: dict[Path, bytes | None]):
+    for path, content in snapshot.items():
+        if content is None:
+            if path.exists():
+                path.unlink()
+            continue
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
+def _approval_snapshot_paths() -> list[Path]:
+    return [
+        REVIEW_QUEUE_PATH,
+        REVIEW_DECISIONS_PATH,
+        memory_taxonomy.MEMORY_RECORDS_PATH,
+        memory_taxonomy.MEMORY_INDEX_PATH,
+    ]
+
+
 def reason_for_review(candidate_record: dict, suggested_action: str = "approve"):
     reasons = []
 
@@ -250,52 +277,58 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
     if item.get("review_status") not in {"pending", "edited", "deferred"}:
         raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
-    candidate = item.get("candidate_record", {})
-    created_record = None
+    snapshot = _snapshot_files(_approval_snapshot_paths())
 
-    # If this is a candidate memory record, approval writes it into real memory.
-    if candidate and not candidate.get("record_id"):
-        created_record = memory_taxonomy.create_memory_record(
-            record_type=candidate.get("record_type"),
-            layer=candidate.get("layer"),
-            scope=candidate.get("scope"),
-            title=candidate.get("title"),
-            summary=candidate.get("summary"),
-            body=candidate.get("body"),
-            tags=candidate.get("tags", []),
-            source_type=candidate.get("source_type", "review_queue"),
-            source_ref=candidate.get("source_ref", review_id),
-            source_title=candidate.get("source_title", "Memory Review Queue"),
-            created_by=reviewed_by,
-            provenance=candidate.get("provenance", f"Approved through review queue item {review_id}."),
-            confidence=candidate.get("confidence", "medium"),
-            status="active",
-            review_state="oracle_approved",
-            expires_at=candidate.get("expires_at"),
-            risk_level=candidate.get("risk_level", "low"),
-            supersedes=candidate.get("supersedes", []),
-            attach_to_context=candidate.get("attach_to_context", False),
-            retrieval_priority=candidate.get("retrieval_priority", 50),
-            recency_weight=candidate.get("recency_weight", 0.5),
-            importance_weight=candidate.get("importance_weight", 0.5),
+    try:
+        candidate = item.get("candidate_record", {})
+        created_record = None
+
+        # If this is a candidate memory record, approval writes it into real memory.
+        if candidate and not candidate.get("record_id"):
+            created_record = memory_taxonomy.create_memory_record(
+                record_type=candidate.get("record_type"),
+                layer=candidate.get("layer"),
+                scope=candidate.get("scope"),
+                title=candidate.get("title"),
+                summary=candidate.get("summary"),
+                body=candidate.get("body"),
+                tags=candidate.get("tags", []),
+                source_type=candidate.get("source_type", "review_queue"),
+                source_ref=candidate.get("source_ref", review_id),
+                source_title=candidate.get("source_title", "Memory Review Queue"),
+                created_by=reviewed_by,
+                provenance=candidate.get("provenance", f"Approved through review queue item {review_id}."),
+                confidence=candidate.get("confidence", "medium"),
+                status="active",
+                review_state="oracle_approved",
+                expires_at=candidate.get("expires_at"),
+                risk_level=candidate.get("risk_level", "low"),
+                supersedes=candidate.get("supersedes", []),
+                attach_to_context=candidate.get("attach_to_context", False),
+                retrieval_priority=candidate.get("retrieval_priority", 50),
+                recency_weight=candidate.get("recency_weight", 0.5),
+                importance_weight=candidate.get("importance_weight", 0.5),
+            )
+
+            item["record_id"] = created_record.get("record_id")
+
+        item["review_status"] = "approved"
+        item["reviewed_at"] = utc_now()
+        item["reviewed_by"] = reviewed_by
+        item["notes"] = notes
+
+        update_review_item(review_id, item)
+
+        decision = write_decision(
+            review_id=review_id,
+            decision="approved",
+            reviewed_by=reviewed_by,
+            notes=notes,
+            record_id=item.get("record_id"),
         )
-
-        item["record_id"] = created_record.get("record_id")
-
-    item["review_status"] = "approved"
-    item["reviewed_at"] = utc_now()
-    item["reviewed_by"] = reviewed_by
-    item["notes"] = notes
-
-    update_review_item(review_id, item)
-
-    decision = write_decision(
-        review_id=review_id,
-        decision="approved",
-        reviewed_by=reviewed_by,
-        notes=notes,
-        record_id=item.get("record_id"),
-    )
+    except Exception:
+        _restore_file_snapshot(snapshot)
+        raise
 
     return {
         "review": item,

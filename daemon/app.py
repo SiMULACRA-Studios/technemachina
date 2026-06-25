@@ -139,6 +139,20 @@ class KnowledgeCandidateCreateRequest(BaseModel):
     created_by: str = "Oracle"
     force: bool = False
 
+
+def _memory_record_exists_read_only(record_id: str) -> bool:
+    if not memory_taxonomy.MEMORY_RECORDS_PATH.exists():
+        return False
+
+    for line in memory_taxonomy.MEMORY_RECORDS_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if record.get("record_id") == record_id:
+            return True
+
+    return False
+
 class KnowledgeCandidateEnqueueRequest(BaseModel):
     reviewed_by: str = "Oracle"
     notes: str = ""
@@ -569,9 +583,12 @@ async def create_memory_record_endpoint(req: MemoryRecordRequest):
 
 @app.post("/memory/{record_id}/revoke")
 async def revoke_memory_endpoint(record_id: str, req: MemoryRevokeRequest):
+    if not _memory_record_exists_read_only(record_id):
+        raise HTTPException(status_code=404, detail="memory_not_found")
+
     record = memory_taxonomy.revoke_memory(record_id, reason=req.reason)
     if not record:
-        return {"status": "error", "detail": "memory_not_found"}
+        raise HTTPException(status_code=404, detail="memory_not_found")
     return {"status": "success", "record": record}
 
 
