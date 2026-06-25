@@ -664,6 +664,18 @@ async def companion_respond(req: CompanionRequest):
             detail="selected_node_id is required",
         )
 
+    risk_report = classify_text(user_message)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Companion request blocked by risk policy.",
+            },
+        )
+
     companion_graph = await synapse_map_payload(view="companion")
     nodes = list(companion_graph.get("nodes", []))
     edges = list(
