@@ -479,10 +479,10 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         memory["hash"] = app.memory_review_queue._memory_hash(memory)
         return memory
 
-    def approval_conflict_response(self, review_id: str):
+    def approval_conflict_response(self, review_id: str, reviewed_by: str = "Oracle"):
         return self.client.post(
             f"/memory/review/{review_id}/approve",
-            json={"reviewed_by": "Oracle", "notes": "conflict must stop"},
+            json={"reviewed_by": reviewed_by, "notes": "conflict must stop"},
         )
 
     def visible_active_record_ids(self, tempdir: str):
@@ -518,13 +518,26 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
         self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
         return review_id, item, operation
 
-    def assert_completed_once(self, tempdir: str, review_id: str):
+    def assert_completed_once(
+        self,
+        tempdir: str,
+        review_id: str,
+        *,
+        expected_reviewer: str = "Oracle",
+        repeat_reviewer: str = "Oracle",
+    ):
         ids = self.expected_approval_ids(review_id)
         state = self.snapshot(tempdir)
         self.assertEqual(state["queue"][0]["review_status"], "approved")
+        self.assertEqual(state["queue"][0]["reviewed_by"], expected_reviewer)
         self.assertEqual([record["record_id"] for record in state["records"]], [ids["record_id"]])
+        self.assertEqual(state["records"][0]["created_by"], expected_reviewer)
+        self.assertEqual(state["records"][0]["status"], "active")
+        self.assertEqual(state["records"][0]["review_state"], "oracle_approved")
         self.assertEqual([decision["decision_id"] for decision in state["decisions"]], [ids["decision_id"]])
+        self.assertEqual(state["decisions"][0]["reviewed_by"], expected_reviewer)
         self.assertEqual(state["operations"][0]["operation_id"], ids["operation_id"])
+        self.assertEqual(state["operations"][0]["reviewed_by"], expected_reviewer)
         self.assertEqual(state["operations"][0]["status"], "complete")
         self.assertEqual(state["operations"][0]["stage"], "complete")
         self.assertEqual(self.approval_index_count(tempdir), 1)
@@ -541,18 +554,31 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
 
         repeated = self.client.post(
             f"/memory/review/{review_id}/approve",
-            json={"reviewed_by": "Oracle", "notes": "repeat approval"},
+            json={"reviewed_by": repeat_reviewer, "notes": "repeat approval"},
         )
         self.assertEqual(repeated.status_code, 409)
         self.assertEqual(repeated.json()["detail"], "invalid_review_transition")
 
-    def assert_retry_completes_once(self, tempdir: str, review_id: str):
+    def assert_retry_completes_once(
+        self,
+        tempdir: str,
+        review_id: str,
+        *,
+        retry_reviewer: str = "Oracle",
+        expected_reviewer: str = "Oracle",
+    ):
         retry = self.client.post(
             f"/memory/review/{review_id}/approve",
-            json={"reviewed_by": "Oracle", "notes": "retry approval"},
+            json={"reviewed_by": retry_reviewer, "notes": "retry approval"},
         )
         self.assertEqual(retry.status_code, 200)
-        self.assert_completed_once(tempdir, review_id)
+        self.assert_completed_once(
+            tempdir,
+            review_id,
+            expected_reviewer=expected_reviewer,
+            repeat_reviewer=retry_reviewer,
+        )
+        return retry
 
     def assert_forward_failure_then_retry(self, tempdir: str, review_id: str, response):
         self.assertEqual(response.status_code, 500)
@@ -851,6 +877,337 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 self.assertEqual(state["operations"][0]["stage"], "memory_indexed")
                 self.assert_forward_failure_then_retry(tempdir, review_id, response)
 
+    def test_different_reviewer_recovery_preserves_initial_approval_attribution(self):
+        def decision_write_failure(stack):
+            stack.enter_context(
+                patch.object(
+                    app.memory_review_queue,
+                    "_save_decisions",
+                    side_effect=RuntimeError("/tmp/secret approval failure"),
+                )
+            )
+
+        def decision_stage_failure(stack):
+            original = app.memory_review_queue._save_approval_operations
+            call_count = {"count": 0}
+
+            def fail_second_stage_write(rows):
+                call_count["count"] += 1
+                if call_count["count"] == 2:
+                    raise RuntimeError("/tmp/secret approval failure")
+                return original(rows)
+
+            stack.enter_context(
+                patch.object(
+                    app.memory_review_queue,
+                    "_save_approval_operations",
+                    side_effect=fail_second_stage_write,
+                )
+            )
+
+        def draft_memory_failure(stack):
+            stack.enter_context(
+                patch.object(
+                    app.memory_review_queue,
+                    "_save_memory_records",
+                    side_effect=RuntimeError("/tmp/secret approval failure"),
+                )
+            )
+
+        def review_approval_failure(stack):
+            stack.enter_context(
+                patch.object(
+                    app.memory_review_queue,
+                    "update_review_item",
+                    side_effect=RuntimeError("/tmp/secret approval failure"),
+                )
+            )
+
+        def active_promotion_failure(stack):
+            original = app.memory_review_queue._save_memory_records
+            call_count = {"count": 0}
+
+            def fail_second_memory_save(rows):
+                call_count["count"] += 1
+                if call_count["count"] == 2:
+                    raise RuntimeError("/tmp/secret approval failure")
+                return original(rows)
+
+            stack.enter_context(
+                patch.object(
+                    app.memory_review_queue,
+                    "_save_memory_records",
+                    side_effect=fail_second_memory_save,
+                )
+            )
+
+        def index_failure(stack):
+            stack.enter_context(
+                patch.object(
+                    app.memory_taxonomy,
+                    "rebuild_index",
+                    side_effect=RuntimeError("/tmp/secret approval failure"),
+                )
+            )
+
+        def completion_marker_failure(stack):
+            original = app.memory_review_queue._mark_approval_operation
+
+            def fail_complete(operation, stage, status="incomplete", error=""):
+                if stage == "complete":
+                    raise RuntimeError("/tmp/secret approval failure")
+                return original(operation, stage, status=status, error=error)
+
+            stack.enter_context(
+                patch.object(app.memory_review_queue, "_mark_approval_operation", side_effect=fail_complete)
+            )
+
+        cases = [
+            ("after_operation_creation", decision_write_failure, "operation_started"),
+            ("after_decision_write", decision_stage_failure, "operation_started"),
+            ("after_decision_stage", draft_memory_failure, "decision_recorded"),
+            ("after_draft_creation", review_approval_failure, "memory_draft"),
+            ("after_review_approval", active_promotion_failure, "review_approved"),
+            ("after_active_promotion", index_failure, "memory_active"),
+            ("after_index_rebuild", completion_marker_failure, "memory_indexed"),
+        ]
+
+        for name, install_failure, expected_stage in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        review_id = self.create_review()
+                        install_failure(stack)
+                        response = self.client.post(
+                            f"/memory/review/{review_id}/approve",
+                            json={"reviewed_by": "ReviewerA", "notes": f"{name} failure"},
+                        )
+
+                    self.assertEqual(response.status_code, 500)
+                    self.assertNotIn("/tmp/secret approval failure", response.text)
+
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+                        before = self.snapshot(tempdir)
+                        self.assertEqual(before["operations"][0]["reviewed_by"], "ReviewerA")
+                        self.assertEqual(before["operations"][0]["stage"], expected_stage)
+                        if before["decisions"]:
+                            self.assertEqual(before["decisions"][0]["reviewed_by"], "ReviewerA")
+                        if before["records"]:
+                            self.assertEqual(before["records"][0]["created_by"], "ReviewerA")
+
+                        self.assert_retry_completes_once(
+                            tempdir,
+                            review_id,
+                            retry_reviewer="ReviewerB",
+                            expected_reviewer="ReviewerA",
+                        )
+
+    def test_reviewer_attribution_conflicts_stop_without_mutation(self):
+        cases = [
+            ("operation_decision_reviewer_mismatch", {}, {"reviewed_by": "ReviewerB"}, None),
+            ("operation_memory_creator_mismatch", {}, None, {"created_by": "ReviewerB"}),
+            (
+                "mixed_decision_memory_reviewer_mismatch",
+                {},
+                {"reviewed_by": "ReviewerB"},
+                {"created_by": "ReviewerB"},
+            ),
+            ("missing_operation_reviewer", {"reviewed_by": None}, None, None),
+            ("empty_operation_reviewer", {"reviewed_by": ""}, None, None),
+            ("missing_decision_reviewer", {}, {"reviewed_by": None}, None),
+            ("missing_memory_created_by", {}, None, {"created_by": None}),
+        ]
+
+        for name, operation_overrides, decision_overrides, memory_overrides in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        review_id = self.create_review()
+                        item = app.memory_review_queue.load_queue(include_closed=True)[0]
+                        operation_fixture = {"reviewed_by": "ReviewerA"}
+                        operation_fixture.update(operation_overrides)
+                        operation = self.approval_operation(
+                            review_id,
+                            item,
+                            **operation_fixture,
+                        )
+                        self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                        ids = self.expected_approval_ids(review_id)
+                        if decision_overrides is not None:
+                            decision_fixture = {"reviewed_by": "ReviewerA"}
+                            decision_fixture.update(decision_overrides)
+                            decision = self.approval_decision(
+                                review_id,
+                                ids,
+                                **decision_fixture,
+                            )
+                            self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [decision])
+                        if memory_overrides is not None:
+                            memory_fixture = {"created_by": "ReviewerA"}
+                            memory_fixture.update(memory_overrides)
+                            memory = self.approval_memory(
+                                operation,
+                                item,
+                                **memory_fixture,
+                            )
+                            self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [memory])
+
+                        before = self.durable_snapshot(tempdir)
+                        self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
+
+    def test_different_reviewer_initial_approval_concurrency_uses_one_authoritative_approver(self):
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+
+                def approve(reviewer):
+                    return self.client.post(
+                        f"/memory/review/{review_id}/approve",
+                        json={"reviewed_by": reviewer, "notes": f"concurrent {reviewer}"},
+                    )
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    responses = list(executor.map(approve, ["ReviewerA", "ReviewerB"]))
+
+                statuses = sorted(response.status_code for response in responses)
+                self.assertIn(statuses, ([200, 200], [200, 409]))
+                state = self.snapshot(tempdir)
+                self.assertEqual(len(state["operations"]), 1)
+                self.assertEqual(len(state["decisions"]), 1)
+                self.assertEqual(len(state["records"]), 1)
+                effective_reviewer = state["operations"][0]["reviewed_by"]
+                self.assertIn(effective_reviewer, {"ReviewerA", "ReviewerB"})
+                self.assertEqual(state["queue"][0]["reviewed_by"], effective_reviewer)
+                self.assertEqual(state["decisions"][0]["reviewed_by"], effective_reviewer)
+                self.assertEqual(state["records"][0]["created_by"], effective_reviewer)
+                self.assert_completed_once(
+                    tempdir,
+                    review_id,
+                    expected_reviewer=effective_reviewer,
+                    repeat_reviewer="ReviewerB",
+                )
+
+    def test_different_reviewer_concurrent_recovery_preserves_initial_approver(self):
+        import concurrent.futures
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                stack.enter_context(
+                    patch.object(
+                        app.memory_review_queue,
+                        "_save_memory_records",
+                        side_effect=RuntimeError("/tmp/secret approval failure"),
+                    )
+                )
+                response = self.client.post(
+                    f"/memory/review/{review_id}/approve",
+                    json={"reviewed_by": "ReviewerA", "notes": "fail before draft"},
+                )
+
+            self.assertEqual(response.status_code, 500)
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                def approve(reviewer):
+                    return self.client.post(
+                        f"/memory/review/{review_id}/approve",
+                        json={"reviewed_by": reviewer, "notes": f"recovery {reviewer}"},
+                    )
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    responses = list(executor.map(approve, ["ReviewerB", "ReviewerC"]))
+
+                statuses = sorted(response.status_code for response in responses)
+                self.assertIn(statuses, ([200, 200], [200, 409]))
+                self.assert_completed_once(
+                    tempdir,
+                    review_id,
+                    expected_reviewer="ReviewerA",
+                    repeat_reviewer="ReviewerC",
+                )
+
+    def test_different_reviewer_recovery_racing_with_other_actions_keeps_approval_consistent(self):
+        import concurrent.futures
+
+        def alternate_request(action, review_id):
+            if action == "edit":
+                return self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"title": "Edited during approval recovery"},
+                        "reviewed_by": "ReviewerB",
+                        "notes": "edit race",
+                    },
+                )
+            return self.client.post(
+                f"/memory/review/{review_id}/{action}",
+                json={"reviewed_by": "ReviewerB", "notes": f"{action} race"},
+            )
+
+        for action in ("reject", "defer", "edit"):
+            with self.subTest(action=action):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        review_id = self.create_review()
+                        stack.enter_context(
+                            patch.object(
+                                app.memory_review_queue,
+                                "_save_memory_records",
+                                side_effect=RuntimeError("/tmp/secret approval failure"),
+                            )
+                        )
+                        response = self.client.post(
+                            f"/memory/review/{review_id}/approve",
+                            json={"reviewed_by": "ReviewerA", "notes": "fail before draft"},
+                        )
+
+                    self.assertEqual(response.status_code, 500)
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        def approve():
+                            return self.client.post(
+                                f"/memory/review/{review_id}/approve",
+                                json={"reviewed_by": "ReviewerB", "notes": "recover"},
+                            )
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                            approve_response, alternate_response = list(
+                                executor.map(lambda call: call(), [approve, lambda: alternate_request(action, review_id)])
+                            )
+
+                        self.assertEqual(approve_response.status_code, 200)
+                        self.assertEqual(alternate_response.status_code, 409)
+                        self.assertEqual(alternate_response.json()["detail"], "invalid_review_transition")
+                        self.assert_completed_once(
+                            tempdir,
+                            review_id,
+                            expected_reviewer="ReviewerA",
+                            repeat_reviewer="ReviewerB",
+                        )
+
     def test_approval_operation_provenance_conflicts_stop_without_mutation(self):
         cases = [
             (
@@ -1030,6 +1387,7 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 item = app.memory_review_queue.load_queue(include_closed=True)[0]
                 operation = self.approval_operation(review_id, item)
                 self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                before_edit = self.durable_snapshot(tempdir)
 
                 edit = self.client.post(
                     f"/memory/review/{review_id}/edit",
@@ -1039,7 +1397,17 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                         "notes": "candidate changed after operation",
                     },
                 )
-                self.assertEqual(edit.status_code, 200)
+                self.assertEqual(edit.status_code, 409)
+                self.assertEqual(edit.json()["detail"], "invalid_review_transition")
+                self.assert_no_durable_change(tempdir, before_edit)
+
+                queue = app.memory_review_queue.load_queue(include_closed=True)
+                queue[0]["candidate_record"]["title"] = "Edited memory probe"
+                queue[0]["diff"] = app.memory_review_queue.build_diff(
+                    queue[0].get("original_record", {}),
+                    queue[0]["candidate_record"],
+                )
+                app.memory_review_queue.save_queue(queue)
                 before = self.durable_snapshot(tempdir)
                 self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
 

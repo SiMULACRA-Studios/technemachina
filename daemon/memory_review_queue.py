@@ -181,6 +181,20 @@ def _approval_conflict():
     raise ApprovalStateConflict("approval_state_conflict")
 
 
+def _normalize_requested_reviewer(reviewed_by: str) -> str:
+    return (reviewed_by or "Oracle").strip() or "Oracle"
+
+
+def _operation_reviewer(operation: dict) -> str:
+    reviewed_by = operation.get("reviewed_by")
+    if not isinstance(reviewed_by, str):
+        _approval_conflict()
+    normalized = reviewed_by.strip()
+    if not normalized or normalized != reviewed_by:
+        _approval_conflict()
+    return normalized
+
+
 def _expected_approval_projection(review_id: str, item: dict, reviewed_by: str) -> dict:
     ids = _stable_approval_ids(review_id, item)
     operation = {
@@ -189,7 +203,7 @@ def _expected_approval_projection(review_id: str, item: dict, reviewed_by: str) 
         "candidate_identity": ids["candidate_identity"],
         "intended_memory_record_id": ids["memory_record_id"],
         "intended_decision_id": ids["decision_id"],
-        "reviewed_by": (reviewed_by or "Oracle").strip() or "Oracle",
+        "reviewed_by": _normalize_requested_reviewer(reviewed_by),
     }
     memory = _approval_memory_payload(operation, item, operation["reviewed_by"])
     return {
@@ -221,6 +235,7 @@ def _validate_approval_operation(operation: dict, expected: dict):
         "candidate_identity": expected["candidate_identity"],
         "intended_memory_record_id": expected["memory_record_id"],
         "intended_decision_id": expected["decision_id"],
+        "reviewed_by": expected["reviewed_by"],
     }
 
     for key, value in required.items():
@@ -242,6 +257,7 @@ def _validate_approval_decision(decision: dict | None, operation: dict):
         "operation_id": operation["operation_id"],
         "queue_version": REVIEW_QUEUE_VERSION,
         "policy_version": POLICY_VERSION,
+        "reviewed_by": _operation_reviewer(operation),
     }
 
     for key, value in required.items():
@@ -335,15 +351,17 @@ def _upsert_approval_operation(operation: dict):
 
 
 def _ensure_approval_operation(review_id: str, item: dict, reviewed_by: str, notes: str) -> dict:
-    expected = _expected_approval_projection(review_id, item, reviewed_by)
     existing = _find_approval_operation(review_id)
     now = utc_now()
 
     if existing:
+        effective_reviewer = _operation_reviewer(existing)
+        expected = _expected_approval_projection(review_id, item, effective_reviewer)
         _validate_approval_operation(existing, expected)
         _validate_existing_approval_state(existing, item)
         return existing
 
+    expected = _expected_approval_projection(review_id, item, reviewed_by)
     operation = {
         "operation_id": expected["operation_id"],
         "review_id": review_id,
@@ -429,7 +447,7 @@ def _approval_memory_payload(operation: dict, item: dict, reviewed_by: str) -> d
         "source_type": str(candidate.get("source_type", "review_queue")).strip() or "review_queue",
         "source_ref": str(candidate.get("source_ref", item.get("review_id"))).strip(),
         "source_title": str(candidate.get("source_title", "Memory Review Queue")).strip(),
-        "created_by": (reviewed_by or "Oracle").strip() or "Oracle",
+        "created_by": _normalize_requested_reviewer(reviewed_by),
         "provenance": str(candidate.get(
             "provenance",
             f"Approved through review queue item {item.get('review_id')}.",
@@ -724,6 +742,7 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
             raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
         operation = _ensure_approval_operation(review_id, item, reviewed_by, notes)
+        effective_reviewer = operation["reviewed_by"]
 
         if item.get("review_status") not in {"pending", "edited", "deferred"}:
             if _approval_effects_complete(item, operation):
@@ -731,10 +750,10 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
             if not _approval_has_incomplete_recoverable_state(item, operation):
                 raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
-        decision = _ensure_approval_decision(operation, reviewed_by, notes)
+        decision = _ensure_approval_decision(operation, effective_reviewer, notes)
         operation = _mark_approval_operation(operation, "decision_recorded")
 
-        created_record = _ensure_approval_memory(operation, item, reviewed_by)
+        created_record = _ensure_approval_memory(operation, item, effective_reviewer)
         operation = _mark_approval_operation(operation, "memory_draft")
 
         item = get_review_item(review_id)
@@ -744,7 +763,7 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
         item["record_id"] = operation.get("intended_memory_record_id")
         item["review_status"] = "approved"
         item["reviewed_at"] = item.get("reviewed_at") or utc_now()
-        item["reviewed_by"] = reviewed_by
+        item["reviewed_by"] = effective_reviewer
         item["notes"] = notes
 
         update_review_item(review_id, item)
@@ -767,102 +786,114 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
 
 
 def reject_review(review_id: str, reviewed_by: str = "Oracle", notes: str = ""):
-    item = get_review_item(review_id)
+    with _APPROVAL_LOCK:
+        item = get_review_item(review_id)
 
-    if not item:
-        return None
+        if not item:
+            return None
 
-    if item.get("review_status") not in {"pending", "edited", "deferred"}:
-        raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
+        if _find_approval_operation(review_id):
+            raise ValueError("Review item has an approval operation in progress")
 
-    item["review_status"] = "rejected"
-    item["reviewed_at"] = utc_now()
-    item["reviewed_by"] = reviewed_by
-    item["notes"] = notes
+        if item.get("review_status") not in {"pending", "edited", "deferred"}:
+            raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
-    update_review_item(review_id, item)
+        item["review_status"] = "rejected"
+        item["reviewed_at"] = utc_now()
+        item["reviewed_by"] = reviewed_by
+        item["notes"] = notes
 
-    decision = write_decision(
-        review_id=review_id,
-        decision="rejected",
-        reviewed_by=reviewed_by,
-        notes=notes,
-        record_id=item.get("record_id"),
-    )
+        update_review_item(review_id, item)
 
-    return {
-        "review": item,
-        "decision": decision,
-    }
+        decision = write_decision(
+            review_id=review_id,
+            decision="rejected",
+            reviewed_by=reviewed_by,
+            notes=notes,
+            record_id=item.get("record_id"),
+        )
+
+        return {
+            "review": item,
+            "decision": decision,
+        }
 
 
 def defer_review(review_id: str, reviewed_by: str = "Oracle", notes: str = ""):
-    item = get_review_item(review_id)
+    with _APPROVAL_LOCK:
+        item = get_review_item(review_id)
 
-    if not item:
-        return None
+        if not item:
+            return None
 
-    if item.get("review_status") not in {"pending", "edited", "deferred"}:
-        raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
+        if _find_approval_operation(review_id):
+            raise ValueError("Review item has an approval operation in progress")
 
-    item["review_status"] = "deferred"
-    item["reviewed_at"] = utc_now()
-    item["reviewed_by"] = reviewed_by
-    item["notes"] = notes
+        if item.get("review_status") not in {"pending", "edited", "deferred"}:
+            raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
-    update_review_item(review_id, item)
+        item["review_status"] = "deferred"
+        item["reviewed_at"] = utc_now()
+        item["reviewed_by"] = reviewed_by
+        item["notes"] = notes
 
-    decision = write_decision(
-        review_id=review_id,
-        decision="deferred",
-        reviewed_by=reviewed_by,
-        notes=notes,
-        record_id=item.get("record_id"),
-    )
+        update_review_item(review_id, item)
 
-    return {
-        "review": item,
-        "decision": decision,
-    }
+        decision = write_decision(
+            review_id=review_id,
+            decision="deferred",
+            reviewed_by=reviewed_by,
+            notes=notes,
+            record_id=item.get("record_id"),
+        )
+
+        return {
+            "review": item,
+            "decision": decision,
+        }
 
 
 def edit_review(review_id: str, patch: dict, reviewed_by: str = "Oracle", notes: str = ""):
-    item = get_review_item(review_id)
+    with _APPROVAL_LOCK:
+        item = get_review_item(review_id)
 
-    if not item:
-        return None
+        if not item:
+            return None
 
-    if item.get("review_status") not in {"pending", "edited", "deferred"}:
-        raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
+        if _find_approval_operation(review_id):
+            raise ValueError("Review item has an approval operation in progress")
 
-    candidate = item.get("candidate_record", {})
-    original_candidate = dict(candidate)
+        if item.get("review_status") not in {"pending", "edited", "deferred"}:
+            raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
-    for key, value in patch.items():
-        candidate[key] = value
+        candidate = item.get("candidate_record", {})
+        original_candidate = dict(candidate)
 
-    item["candidate_record"] = candidate
-    item["diff"] = build_diff(item.get("original_record", {}), candidate)
-    item["review_status"] = "edited"
-    item["reviewed_at"] = utc_now()
-    item["reviewed_by"] = reviewed_by
-    item["notes"] = notes or "Candidate record edited."
+        for key, value in patch.items():
+            candidate[key] = value
 
-    update_review_item(review_id, item)
+        item["candidate_record"] = candidate
+        item["diff"] = build_diff(item.get("original_record", {}), candidate)
+        item["review_status"] = "edited"
+        item["reviewed_at"] = utc_now()
+        item["reviewed_by"] = reviewed_by
+        item["notes"] = notes or "Candidate record edited."
 
-    decision = write_decision(
-        review_id=review_id,
-        decision="edited",
-        reviewed_by=reviewed_by,
-        notes=notes,
-        record_id=item.get("record_id"),
-    )
+        update_review_item(review_id, item)
 
-    return {
-        "review": item,
-        "decision": decision,
-        "previous_candidate": original_candidate,
-    }
+        decision = write_decision(
+            review_id=review_id,
+            decision="edited",
+            reviewed_by=reviewed_by,
+            notes=notes,
+            record_id=item.get("record_id"),
+        )
+
+        return {
+            "review": item,
+            "decision": decision,
+            "previous_candidate": original_candidate,
+        }
 
 
 def review_status():
