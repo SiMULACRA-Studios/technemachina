@@ -664,6 +664,18 @@ async def companion_respond(req: CompanionRequest):
             detail="selected_node_id is required",
         )
 
+    risk_report = classify_text(user_message)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Companion request blocked by risk policy.",
+            },
+        )
+
     companion_graph = await synapse_map_payload(view="companion")
     nodes = list(companion_graph.get("nodes", []))
     edges = list(
@@ -906,6 +918,18 @@ Keep the answer bounded, concise, and project-aware.
 
 @app.post("/chat")
 async def handle_chat(req: ChatRequest):
+    risk_report = classify_text(req.prompt)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Chat request blocked by risk policy.",
+            },
+        )
+
     requested_thread_id = getattr(req, "thread_id", "") or thread_registry.get_active_thread_id()
     thread_id = thread_registry.safe_thread_id(requested_thread_id)
 
@@ -1025,19 +1049,29 @@ async def thread_location():
     }
 
 
+def _get_thread_or_404(thread_id: str) -> dict:
+    if not thread_registry.REGISTRY_PATH.exists():
+        raise HTTPException(status_code=404, detail="thread_not_found")
+
+    thread = thread_registry.get_thread(thread_id)
+
+    if not thread:
+        raise HTTPException(status_code=404, detail="thread_not_found")
+
+    return thread
+
+
 @app.post("/threads/{thread_id}/rename")
 async def rename_thread_endpoint(thread_id: str, req: ThreadRenameRequest):
+    _get_thread_or_404(thread_id)
     thread = thread_registry.rename_thread(thread_id, req.title)
-    if not thread:
-        return {"status": "error", "detail": "thread_not_found"}
     return {"status": "success", "thread": thread}
 
 
 @app.post("/threads/{thread_id}/archive")
 async def archive_thread_endpoint(thread_id: str):
+    _get_thread_or_404(thread_id)
     thread = thread_registry.archive_thread(thread_id)
-    if not thread:
-        return {"status": "error", "detail": "thread_not_found"}
     return {
         "status": "success",
         "thread": thread,
@@ -1048,9 +1082,8 @@ async def archive_thread_endpoint(thread_id: str):
 
 @app.post("/threads/{thread_id}/restore")
 async def restore_thread_endpoint(thread_id: str):
+    _get_thread_or_404(thread_id)
     thread = thread_registry.restore_thread(thread_id)
-    if not thread:
-        return {"status": "error", "detail": "thread_not_found"}
     return {
         "status": "success",
         "thread": thread,
@@ -1061,10 +1094,19 @@ async def restore_thread_endpoint(thread_id: str):
 
 @app.get("/threads/{thread_id}")
 async def get_thread(thread_id: str):
-    thread = thread_registry.get_thread(thread_id)
+    if not thread_registry.REGISTRY_PATH.exists():
+        if thread_id != thread_registry.DEFAULT_THREAD_ID:
+            raise HTTPException(status_code=404, detail="thread_not_found")
+
+        thread = thread_registry.ensure_thread(thread_id=thread_registry.DEFAULT_THREAD_ID)
+    else:
+        thread = thread_registry.get_thread(thread_id)
+
+        if not thread and thread_id == thread_registry.DEFAULT_THREAD_ID:
+            thread = thread_registry.ensure_thread(thread_id=thread_registry.DEFAULT_THREAD_ID)
 
     if not thread:
-        thread = thread_registry.ensure_thread(thread_id=thread_id)
+        raise HTTPException(status_code=404, detail="thread_not_found")
 
     messages = thread_context.load_messages(thread_id=thread_id, limit=40)
 
@@ -1076,6 +1118,18 @@ async def get_thread(thread_id: str):
 
 @app.post("/explain")
 async def handle_explain(req: ToolRequest):
+    risk_report = classify_text(req.code)
+
+    if risk_report.level == RiskLevel.BLOCKED:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "risk": risk_report.model_dump(mode="json"),
+                "error": "blocked_risk",
+                "message": "Explain request blocked by risk policy.",
+            },
+        )
+
     prompt = tools.format_explain_prompt(req.code)
     reply = ai.query_model(prompt, req.model)
     return {"response": reply}
