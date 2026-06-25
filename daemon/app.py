@@ -438,6 +438,8 @@ async def memory_review_approve(review_id: str, req: MemoryReviewDecisionRequest
             notes=req.notes,
         )
         return _memory_review_success(result)
+    except memory_review_queue.ApprovalStateConflict as exc:
+        raise HTTPException(status_code=409, detail="approval_state_conflict") from exc
     except ValueError as exc:
         raise _memory_review_transition_conflict(exc) from exc
 

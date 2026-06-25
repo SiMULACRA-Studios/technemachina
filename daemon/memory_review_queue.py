@@ -41,6 +41,21 @@ HIGH_TRUST_LAYERS = {"theta", "delta"}
 HIGH_RISK_TYPES = {"doctrine_note", "risk_note", "procedure"}
 _APPROVAL_LOCK = threading.RLock()
 
+APPROVAL_OPERATION_STAGES = {
+    "operation_started",
+    "decision_recorded",
+    "memory_draft",
+    "review_approved",
+    "memory_active",
+    "memory_indexed",
+    "complete",
+}
+APPROVAL_OPERATION_STATUSES = {"incomplete", "complete"}
+
+
+class ApprovalStateConflict(Exception):
+    """Raised when durable approval recovery state conflicts with the review."""
+
 
 def utc_now():
     return datetime.now(timezone.utc).isoformat()
@@ -162,6 +177,143 @@ def _stable_approval_ids(review_id: str, item: dict) -> dict:
     }
 
 
+def _approval_conflict():
+    raise ApprovalStateConflict("approval_state_conflict")
+
+
+def _expected_approval_projection(review_id: str, item: dict, reviewed_by: str) -> dict:
+    ids = _stable_approval_ids(review_id, item)
+    operation = {
+        "operation_id": ids["operation_id"],
+        "review_id": review_id,
+        "candidate_identity": ids["candidate_identity"],
+        "intended_memory_record_id": ids["memory_record_id"],
+        "intended_decision_id": ids["decision_id"],
+        "reviewed_by": (reviewed_by or "Oracle").strip() or "Oracle",
+    }
+    memory = _approval_memory_payload(operation, item, operation["reviewed_by"])
+    return {
+        **ids,
+        "review_id": review_id,
+        "reviewed_by": operation["reviewed_by"],
+        "memory": memory,
+    }
+
+
+def _validate_operation_stage_status(operation: dict):
+    stage = operation.get("stage")
+    status = operation.get("status")
+
+    if stage not in APPROVAL_OPERATION_STAGES:
+        _approval_conflict()
+    if status not in APPROVAL_OPERATION_STATUSES:
+        _approval_conflict()
+    if status == "complete" and stage != "complete":
+        _approval_conflict()
+    if stage == "complete" and status != "complete":
+        _approval_conflict()
+
+
+def _validate_approval_operation(operation: dict, expected: dict):
+    required = {
+        "operation_id": expected["operation_id"],
+        "review_id": expected["review_id"],
+        "candidate_identity": expected["candidate_identity"],
+        "intended_memory_record_id": expected["memory_record_id"],
+        "intended_decision_id": expected["decision_id"],
+    }
+
+    for key, value in required.items():
+        if operation.get(key) != value:
+            _approval_conflict()
+
+    _validate_operation_stage_status(operation)
+
+
+def _validate_approval_decision(decision: dict | None, operation: dict):
+    if not decision:
+        return
+
+    required = {
+        "decision_id": operation["intended_decision_id"],
+        "review_id": operation["review_id"],
+        "decision": "approved",
+        "record_id": operation["intended_memory_record_id"],
+        "operation_id": operation["operation_id"],
+        "queue_version": REVIEW_QUEUE_VERSION,
+        "policy_version": POLICY_VERSION,
+    }
+
+    for key, value in required.items():
+        if decision.get(key) != value:
+            _approval_conflict()
+
+
+def _validate_approval_memory(record: dict | None, operation: dict, item: dict):
+    if not record:
+        return
+
+    expected = _approval_memory_payload(
+        operation,
+        item,
+        operation.get("reviewed_by") or "Oracle",
+    )
+    comparable_fields = (
+        "record_id",
+        "record_type",
+        "layer",
+        "scope",
+        "title",
+        "summary",
+        "body",
+        "tags",
+        "source_type",
+        "source_ref",
+        "source_title",
+        "created_by",
+        "provenance",
+        "confidence",
+        "expires_at",
+        "risk_level",
+        "supersedes",
+        "attach_to_context",
+        "retrieval_priority",
+        "recency_weight",
+        "importance_weight",
+    )
+
+    for field in comparable_fields:
+        if record.get(field) != expected.get(field):
+            _approval_conflict()
+
+    status = record.get("status")
+    review_state = record.get("review_state")
+    if status == "draft":
+        if review_state != "needs_review":
+            _approval_conflict()
+        return
+    if status == "active":
+        if review_state != "oracle_approved":
+            _approval_conflict()
+        return
+
+    _approval_conflict()
+
+
+def _validate_existing_approval_state(operation: dict, item: dict):
+    _validate_approval_decision(
+        _find_approval_decision(operation["intended_decision_id"]),
+        operation,
+    )
+    _validate_approval_memory(
+        _find_memory_record(operation["intended_memory_record_id"]),
+        operation,
+        item,
+    )
+    if operation.get("status") == "complete" and not _approval_effects_complete(item, operation):
+        _approval_conflict()
+
+
 def _find_approval_operation(review_id: str) -> dict | None:
     operation_id = f"approval_{review_id}"
     for operation in _load_approval_operations():
@@ -183,27 +335,27 @@ def _upsert_approval_operation(operation: dict):
 
 
 def _ensure_approval_operation(review_id: str, item: dict, reviewed_by: str, notes: str) -> dict:
-    ids = _stable_approval_ids(review_id, item)
+    expected = _expected_approval_projection(review_id, item, reviewed_by)
     existing = _find_approval_operation(review_id)
     now = utc_now()
 
     if existing:
-        if existing.get("candidate_identity") != ids["candidate_identity"]:
-            raise ValueError("approval_operation_candidate_mismatch")
+        _validate_approval_operation(existing, expected)
+        _validate_existing_approval_state(existing, item)
         return existing
 
     operation = {
-        "operation_id": ids["operation_id"],
+        "operation_id": expected["operation_id"],
         "review_id": review_id,
-        "candidate_identity": ids["candidate_identity"],
-        "intended_memory_record_id": ids["memory_record_id"],
-        "intended_decision_id": ids["decision_id"],
+        "candidate_identity": expected["candidate_identity"],
+        "intended_memory_record_id": expected["memory_record_id"],
+        "intended_decision_id": expected["decision_id"],
         "stage": "operation_started",
         "status": "incomplete",
         "created_at": now,
         "updated_at": now,
         "completed_at": None,
-        "reviewed_by": reviewed_by,
+        "reviewed_by": expected["reviewed_by"],
         "notes": notes,
         "error": "",
     }
@@ -221,8 +373,12 @@ def _mark_approval_operation(operation: dict, stage: str, status: str = "incompl
     return _upsert_approval_operation(operation)
 
 
-def _load_all_memory_records() -> list[dict]:
-    memory_taxonomy.ensure_memory_store()
+def _load_all_memory_records(ensure: bool = True) -> list[dict]:
+    if ensure:
+        memory_taxonomy.ensure_memory_store()
+    elif not memory_taxonomy.MEMORY_RECORDS_PATH.exists():
+        return []
+
     rows = []
     for line in memory_taxonomy.MEMORY_RECORDS_PATH.read_text(encoding="utf-8").splitlines():
         if line.strip():
@@ -236,7 +392,7 @@ def _save_memory_records(rows: list[dict]):
 
 
 def _find_memory_record(record_id: str) -> dict | None:
-    for record in _load_all_memory_records():
+    for record in _load_all_memory_records(ensure=False):
         if record.get("record_id") == record_id:
             return record
     return None
@@ -312,6 +468,7 @@ def _ensure_approval_memory(operation: dict, item: dict, reviewed_by: str) -> di
     records = _load_all_memory_records()
     for record in records:
         if record.get("record_id") == record_id:
+            _validate_approval_memory(record, operation, item)
             return record
 
     payload = _approval_memory_payload(operation, item, reviewed_by)
@@ -326,6 +483,10 @@ def _promote_approval_memory(operation: dict) -> dict:
 
     for record in records:
         if record.get("record_id") == record_id:
+            item = get_review_item(operation["review_id"])
+            if not item:
+                raise ValueError("approval_review_missing")
+            _validate_approval_memory(record, operation, item)
             if record.get("status") != "active":
                 record["status"] = "active"
                 record["review_state"] = "oracle_approved"
@@ -361,6 +522,7 @@ def _find_approval_decision(decision_id: str) -> dict | None:
 def _ensure_approval_decision(operation: dict, reviewed_by: str, notes: str) -> dict:
     existing = _find_approval_decision(operation["intended_decision_id"])
     if existing:
+        _validate_approval_decision(existing, operation)
         return existing
 
     decision = {
@@ -388,7 +550,7 @@ def _index_contains_active_record(record_id: str) -> bool:
         index = json.loads(memory_taxonomy.MEMORY_INDEX_PATH.read_text(encoding="utf-8"))
     except Exception:
         return False
-    records = _load_all_memory_records()
+    records = _load_all_memory_records(ensure=False)
     active_ids = {r.get("record_id") for r in records if r.get("status") == "active"}
     return record_id in active_ids and index.get("record_count", 0) == len(active_ids)
 
@@ -396,6 +558,10 @@ def _index_contains_active_record(record_id: str) -> bool:
 def _approval_effects_complete(item: dict, operation: dict) -> bool:
     record = _find_memory_record(operation["intended_memory_record_id"])
     decision = _find_approval_decision(operation["intended_decision_id"])
+    if record:
+        _validate_approval_memory(record, operation, item)
+    if decision:
+        _validate_approval_decision(decision, operation)
     return (
         item.get("review_status") == "approved"
         and bool(decision)
@@ -553,6 +719,9 @@ def approve_review(review_id: str, reviewed_by: str = "Oracle", notes: str = "")
 
         if not item:
             return None
+
+        if item.get("review_status") not in {"pending", "edited", "deferred"} and not _find_approval_operation(review_id):
+            raise ValueError(f"Review item is already closed with status {item.get('review_status')}")
 
         operation = _ensure_approval_operation(review_id, item, reviewed_by, notes)
 

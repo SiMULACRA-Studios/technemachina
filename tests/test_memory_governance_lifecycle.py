@@ -427,6 +427,97 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def approval_operation(
+        self,
+        review_id: str,
+        item: dict,
+        *,
+        stage: str = "operation_started",
+        status: str = "incomplete",
+        **overrides,
+    ):
+        ids = app.memory_review_queue._stable_approval_ids(review_id, item)
+        operation = {
+            "operation_id": ids["operation_id"],
+            "review_id": review_id,
+            "candidate_identity": ids["candidate_identity"],
+            "intended_memory_record_id": ids["memory_record_id"],
+            "intended_decision_id": ids["decision_id"],
+            "stage": stage,
+            "status": status,
+            "created_at": app.memory_review_queue.utc_now(),
+            "updated_at": app.memory_review_queue.utc_now(),
+            "completed_at": app.memory_review_queue.utc_now() if status == "complete" else None,
+            "reviewed_by": "Oracle",
+            "notes": "approval conflict fixture",
+            "error": "",
+        }
+        operation.update(overrides)
+        return operation
+
+    def approval_decision(self, decision_review_id: str, ids: dict, **overrides):
+        decision = {
+            "decision_id": ids["decision_id"],
+            "review_id": decision_review_id,
+            "decision": "approved",
+            "reviewed_by": "Oracle",
+            "reviewed_at": app.memory_review_queue.utc_now(),
+            "notes": "approval conflict fixture",
+            "record_id": ids["record_id"],
+            "queue_version": app.memory_review_queue.REVIEW_QUEUE_VERSION,
+            "policy_version": app.memory_review_queue.POLICY_VERSION,
+            "operation_id": ids["operation_id"],
+        }
+        decision.update(overrides)
+        return decision
+
+    def approval_memory(self, operation: dict, item: dict, **overrides):
+        memory = app.memory_review_queue._approval_memory_payload(operation, item, "Oracle")
+        memory["status"] = "active"
+        memory["review_state"] = "oracle_approved"
+        memory.update(overrides)
+        memory["hash"] = app.memory_review_queue._memory_hash(memory)
+        return memory
+
+    def approval_conflict_response(self, review_id: str):
+        return self.client.post(
+            f"/memory/review/{review_id}/approve",
+            json={"reviewed_by": "Oracle", "notes": "conflict must stop"},
+        )
+
+    def visible_active_record_ids(self, tempdir: str):
+        records = self.read_jsonl(Path(tempdir) / "memory" / "memory_records.jsonl")
+        return [
+            record["record_id"]
+            for record in records
+            if record.get("status") == "active"
+        ]
+
+    def assert_approval_conflict_no_mutation(self, tempdir: str, review_id: str, before: dict):
+        before_visible = self.visible_active_record_ids(tempdir)
+        response = self.approval_conflict_response(review_id)
+        after_visible = self.visible_active_record_ids(tempdir)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "approval_state_conflict")
+        self.assertNotIn("RuntimeError", response.text)
+        self.assertNotIn(str(Path(tempdir)), response.text)
+        self.assert_no_durable_change(tempdir, before)
+        self.assertEqual(before_visible, after_visible)
+
+    def approved_review_with_incomplete_operation(self):
+        review_id = self.create_review()
+        queue = app.memory_review_queue.load_queue(include_closed=True)
+        item = queue[0]
+        item["review_status"] = "approved"
+        item["reviewed_at"] = app.memory_review_queue.utc_now()
+        item["reviewed_by"] = "Oracle"
+        item["notes"] = "approved but incomplete"
+        app.memory_review_queue.save_queue(queue)
+        operation = self.approval_operation(review_id, item)
+        self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+        return review_id, item, operation
+
     def assert_completed_once(self, tempdir: str, review_id: str):
         ids = self.expected_approval_ids(review_id)
         state = self.snapshot(tempdir)
@@ -760,7 +851,219 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 self.assertEqual(state["operations"][0]["stage"], "memory_indexed")
                 self.assert_forward_failure_then_retry(tempdir, review_id, response)
 
-    def test_literal_approved_review_without_decision_or_memory_recovers_through_approval_endpoint(self):
+    def test_approval_operation_provenance_conflicts_stop_without_mutation(self):
+        cases = [
+            (
+                "review_id_mismatch",
+                {"review_id": "rev_other"},
+            ),
+            (
+                "candidate_identity_mismatch",
+                {"candidate_identity": app.memory_review_queue._candidate_identity({"other": "candidate"})},
+            ),
+            (
+                "intended_memory_id_mismatch",
+                {"intended_memory_record_id": "mem_rev_other_approved"},
+            ),
+            (
+                "intended_decision_id_mismatch",
+                {"intended_decision_id": "rd_rev_other_approved"},
+            ),
+            (
+                "unknown_stage",
+                {"stage": "unknown_stage"},
+            ),
+            (
+                "contradictory_stage_status",
+                {"stage": "complete", "status": "incomplete"},
+            ),
+            (
+                "complete_missing_effects",
+                {"stage": "complete", "status": "complete", "completed_at": app.memory_review_queue.utc_now()},
+            ),
+        ]
+
+        for name, overrides in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        review_id, item, operation = self.approved_review_with_incomplete_operation()
+                        operation.update(overrides)
+                        self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                        before = self.durable_snapshot(tempdir)
+                        self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
+
+    def test_existing_approval_decision_conflicts_stop_without_mutation(self):
+        cases = [
+            ("wrong_review_id", {"review_id": "rev_other"}),
+            ("wrong_action", {"decision": "rejected"}),
+            ("wrong_record_id", {"record_id": "mem_rev_other_approved"}),
+            ("wrong_operation_id", {"operation_id": "approval_rev_other"}),
+            ("wrong_queue_version", {"queue_version": "other_version"}),
+        ]
+
+        for name, overrides in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        review_id, item, operation = self.approved_review_with_incomplete_operation()
+                        ids = self.expected_approval_ids(review_id)
+                        decision = self.approval_decision(review_id, ids, **overrides)
+                        self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [decision])
+                        before = self.durable_snapshot(tempdir)
+                        self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
+
+    def test_existing_approval_memory_conflicts_stop_without_mutation(self):
+        cases = [
+            ("wrong_source_ref", {"source_ref": "audit:other"}),
+            ("wrong_provenance", {"provenance": "Unrelated provenance."}),
+            ("wrong_title", {"title": "UNRELATED CONFLICTING MEMORY CONTENT"}),
+            ("wrong_body", {"body": "Unrelated body."}),
+            ("wrong_record_type", {"record_type": "thread_memory"}),
+            ("revoked_status", {"status": "revoked", "review_state": "oracle_approved"}),
+            ("superseded_status", {"status": "superseded", "review_state": "oracle_approved"}),
+            ("expired_status", {"status": "expired", "review_state": "oracle_approved"}),
+            ("draft_wrong_review_state", {"status": "draft", "review_state": "oracle_approved"}),
+        ]
+
+        for name, overrides in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        review_id, item, operation = self.approved_review_with_incomplete_operation()
+                        memory = self.approval_memory(operation, item, **overrides)
+                        self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [memory])
+                        before = self.durable_snapshot(tempdir)
+                        self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
+
+    def test_combined_approval_conflicts_stop_without_mutation(self):
+        cases = [
+            "approved_operation_review_id_conflict",
+            "pending_conflicting_decision_with_matching_draft",
+            "pending_matching_decision_with_conflicting_memory",
+            "approved_conflicting_decision_and_memory",
+            "operation_candidate_conflict_with_valid_effects",
+            "operation_intended_ids_conflict_with_objects_at_deterministic_ids",
+        ]
+
+        for name in cases:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as tempdir:
+                    with ExitStack() as stack:
+                        for manager in self.isolated_memory_store(tempdir):
+                            stack.enter_context(manager)
+
+                        if name.startswith("pending"):
+                            review_id = self.create_review()
+                            item = app.memory_review_queue.load_queue(include_closed=True)[0]
+                            ids = self.expected_approval_ids(review_id)
+                            operation = self.approval_operation(review_id, item)
+                            self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                        else:
+                            review_id, item, operation = self.approved_review_with_incomplete_operation()
+                            ids = self.expected_approval_ids(review_id)
+
+                        if name == "approved_operation_review_id_conflict":
+                            operation["review_id"] = "rev_other"
+                            self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                        elif name == "pending_conflicting_decision_with_matching_draft":
+                            self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [
+                                self.approval_decision(review_id, ids, decision="rejected")
+                            ])
+                            self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [
+                                self.approval_memory(operation, item, status="draft", review_state="needs_review")
+                            ])
+                        elif name == "pending_matching_decision_with_conflicting_memory":
+                            self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [
+                                self.approval_decision(review_id, ids)
+                            ])
+                            self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [
+                                self.approval_memory(operation, item, title="UNRELATED CONFLICTING MEMORY CONTENT")
+                            ])
+                        elif name == "approved_conflicting_decision_and_memory":
+                            self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [
+                                self.approval_decision(review_id, ids, decision="rejected")
+                            ])
+                            self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [
+                                self.approval_memory(operation, item, source_ref="audit:other")
+                            ])
+                        elif name == "operation_candidate_conflict_with_valid_effects":
+                            operation["candidate_identity"] = app.memory_review_queue._candidate_identity({"other": "candidate"})
+                            self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                            self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [
+                                self.approval_decision(review_id, ids)
+                            ])
+                            self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [
+                                self.approval_memory(operation, item)
+                            ])
+                        elif name == "operation_intended_ids_conflict_with_objects_at_deterministic_ids":
+                            operation["intended_memory_record_id"] = "mem_rev_other_approved"
+                            operation["intended_decision_id"] = "rd_rev_other_approved"
+                            self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+                            matching_operation = self.approval_operation(review_id, item)
+                            self.write_jsonl(app.memory_review_queue.REVIEW_DECISIONS_PATH, [
+                                self.approval_decision(review_id, ids)
+                            ])
+                            self.write_jsonl(app.memory_taxonomy.MEMORY_RECORDS_PATH, [
+                                self.approval_memory(matching_operation, item)
+                            ])
+
+                        before = self.durable_snapshot(tempdir)
+                        self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
+
+    def test_stale_approval_operation_after_candidate_edit_stops_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                item = app.memory_review_queue.load_queue(include_closed=True)[0]
+                operation = self.approval_operation(review_id, item)
+                self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
+
+                edit = self.client.post(
+                    f"/memory/review/{review_id}/edit",
+                    json={
+                        "patch": {"title": "Edited memory probe"},
+                        "reviewed_by": "Oracle",
+                        "notes": "candidate changed after operation",
+                    },
+                )
+                self.assertEqual(edit.status_code, 200)
+                before = self.durable_snapshot(tempdir)
+                self.assert_approval_conflict_no_mutation(tempdir, review_id, before)
+
+    def test_arbitrary_approved_review_without_operation_remains_closed(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            with ExitStack() as stack:
+                for manager in self.isolated_memory_store(tempdir):
+                    stack.enter_context(manager)
+
+                review_id = self.create_review()
+                queue = app.memory_review_queue.load_queue(include_closed=True)
+                queue[0]["review_status"] = "approved"
+                queue[0]["reviewed_at"] = app.memory_review_queue.utc_now()
+                queue[0]["reviewed_by"] = "Oracle"
+                queue[0]["notes"] = "closed without operation evidence"
+                app.memory_review_queue.save_queue(queue)
+                before = self.durable_snapshot(tempdir)
+                response = self.approval_conflict_response(review_id)
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"], "invalid_review_transition")
+            self.assert_no_durable_change(tempdir, before)
+
+    def test_literal_approved_review_with_matching_operation_recovers_through_approval_endpoint(self):
         with tempfile.TemporaryDirectory() as tempdir:
             with ExitStack() as stack:
                 for manager in self.isolated_memory_store(tempdir):
@@ -773,6 +1076,8 @@ class MemoryGovernanceLifecycleTests(unittest.TestCase):
                 queue[0]["reviewed_by"] = "Oracle"
                 queue[0]["notes"] = "legacy incomplete approval"
                 app.memory_review_queue.save_queue(queue)
+                operation = self.approval_operation(review_id, queue[0])
+                self.write_jsonl(app.memory_review_queue.APPROVAL_OPERATIONS_PATH, [operation])
                 self.assertFalse(self.read_jsonl(Path(tempdir) / "memory" / "review_decisions.jsonl"))
                 self.assertFalse((Path(tempdir) / "memory" / "memory_records.jsonl").exists())
 
