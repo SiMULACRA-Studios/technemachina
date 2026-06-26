@@ -1946,7 +1946,7 @@ def knowledge_candidate_status() -> dict[str, Any]:
     }
 
 
-_previous_build_candidate_from_knowledge_v028c1b = build_candidate_from_knowledge
+_final_build_candidate_from_knowledge_v028c1b_wrapper = build_candidate_from_knowledge
 
 
 def build_candidate_from_knowledge(
