@@ -266,7 +266,7 @@ async def knowledge_records(limit: int = 100, include_inactive: bool = False):
 @app.post("/knowledge/ingest-text")
 async def knowledge_ingest_text(req: KnowledgeIngestTextRequest):
     if not knowledge_ingest.normalize_text(req.body):
-        raise HTTPException(status_code=422, detail="Knowledge body is empty.")
+        raise HTTPException(status_code=400, detail="Knowledge body is empty.")
 
     try:
         return knowledge_ingest.ingest_text(
@@ -280,7 +280,7 @@ async def knowledge_ingest_text(req: KnowledgeIngestTextRequest):
             provenance=req.provenance,
         )
     except ValueError as exc:
-        return {"status": "error", "detail": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/knowledge/search")
@@ -332,6 +332,9 @@ async def knowledge_candidates_bridge_status():
 
 @app.post("/knowledge/candidates/from-record")
 async def knowledge_candidate_from_record(req: KnowledgeCandidateCreateRequest):
+    if not knowledge_ingest.RECORDS_PATH.exists():
+        raise HTTPException(status_code=400, detail="knowledge_record_not_found")
+
     try:
         return knowledge_ingest.build_candidate_from_knowledge(
             knowledge_record_id=req.knowledge_record_id,
@@ -340,11 +343,14 @@ async def knowledge_candidate_from_record(req: KnowledgeCandidateCreateRequest):
             force=req.force,
         )
     except ValueError as exc:
-        return {"status": "error", "detail": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/knowledge/candidates/{candidate_id}/enqueue")
 async def knowledge_candidate_enqueue(candidate_id: str, req: KnowledgeCandidateEnqueueRequest):
+    if not knowledge_ingest.KNOWLEDGE_CANDIDATES_PATH.exists():
+        raise HTTPException(status_code=400, detail="knowledge_candidate_not_found")
+
     try:
         return knowledge_ingest.enqueue_knowledge_candidate(
             candidate_id=candidate_id,
@@ -352,7 +358,7 @@ async def knowledge_candidate_enqueue(candidate_id: str, req: KnowledgeCandidate
             notes=req.notes,
         )
     except ValueError as exc:
-        return {"status": "error", "detail": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # --- End Technemachina Knowledge-to-Candidate Bridge ---

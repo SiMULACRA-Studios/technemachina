@@ -102,10 +102,17 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
         ]
 
     def store_bytes(self, paths: dict[str, Path]):
-        return {
-            name: path.read_bytes() if path.exists() else None
-            for name, path in paths.items()
-        }
+        snapshot = {}
+
+        for name, path in paths.items():
+            if not path.exists():
+                snapshot[name] = None
+            elif path.is_dir():
+                snapshot[name] = "<DIR>"
+            else:
+                snapshot[name] = path.read_bytes()
+
+        return snapshot
 
     def assert_no_store_mutation(self, before: dict[str, bytes | None], paths: dict[str, Path]):
         self.assertEqual(self.store_bytes(paths), before)
@@ -156,24 +163,38 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
 
                 before = self.store_bytes(paths)
 
-                response = self.client.post(
-                    "/knowledge/ingest-text",
-                    json={
-                        "title": "Whitespace knowledge body",
-                        "body": body,
-                        "source_type": "text",
-                        "source_path": "/tmp/whitespace-body.md",
-                        "origin": "manual",
-                    },
-                )
+                with (
+                    patch.object(
+                        app.knowledge_ingest,
+                        "ingest_text",
+                        side_effect=AssertionError("ingest_text must not be called"),
+                    ) as ingest_mock,
+                    patch.object(
+                        app.knowledge_ingest,
+                        "ensure_store",
+                        side_effect=AssertionError("ensure_store must not be called"),
+                    ) as ensure_mock,
+                ):
+                    response = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Whitespace knowledge body",
+                            "body": body,
+                            "source_type": "text",
+                            "source_path": "/tmp/whitespace-body.md",
+                            "origin": "manual",
+                        },
+                    )
 
-                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.status_code, 400)
                 self.assertEqual(
                     response.json(),
                     {"detail": "Knowledge body is empty."},
                 )
                 self.assertNotEqual(response.status_code, 200)
                 self.assertNotEqual(response.json().get("status"), "success")
+                ingest_mock.assert_not_called()
+                ensure_mock.assert_not_called()
                 self.assert_no_store_mutation(before, paths)
                 self.assertEqual(self.read_jsonl(paths["records"]), [])
                 self.assertEqual(self.read_jsonl(paths["candidates"]), [])
@@ -208,28 +229,50 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
 
                 before = self.store_bytes(paths)
 
-                literal_empty = self.client.post(
-                    "/knowledge/ingest-text",
-                    json={
-                        "title": "Literal empty body",
-                        "body": "",
-                        "source_type": "text",
-                        "source_path": "/tmp/literal-empty.md",
-                        "origin": "manual",
-                    },
-                )
-                missing_body = self.client.post(
-                    "/knowledge/ingest-text",
-                    json={
-                        "title": "Missing body",
-                        "source_type": "text",
-                        "source_path": "/tmp/missing-body.md",
-                        "origin": "manual",
-                    },
-                )
+                with (
+                    patch.object(
+                        app.knowledge_ingest,
+                        "normalize_text",
+                        side_effect=AssertionError("route must not execute"),
+                    ) as normalize_mock,
+                    patch.object(
+                        app.knowledge_ingest,
+                        "ingest_text",
+                        side_effect=AssertionError("ingest_text must not be called"),
+                    ) as ingest_mock,
+                    patch.object(
+                        app.knowledge_ingest,
+                        "ensure_store",
+                        side_effect=AssertionError("ensure_store must not be called"),
+                    ) as ensure_mock,
+                ):
+                    literal_empty = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Literal empty body",
+                            "body": "",
+                            "source_type": "text",
+                            "source_path": "/tmp/literal-empty.md",
+                            "origin": "manual",
+                        },
+                    )
+                    missing_body = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Missing body",
+                            "source_type": "text",
+                            "source_path": "/tmp/missing-body.md",
+                            "origin": "manual",
+                        },
+                    )
 
                 self.assertEqual(literal_empty.status_code, 422)
                 self.assertEqual(missing_body.status_code, 422)
+                self.assertIsInstance(literal_empty.json()["detail"], list)
+                self.assertIsInstance(missing_body.json()["detail"], list)
+                normalize_mock.assert_not_called()
+                ingest_mock.assert_not_called()
+                ensure_mock.assert_not_called()
                 self.assert_no_store_mutation(before, paths)
 
     def test_duplicate_and_search_behavior_are_preserved(self):
@@ -360,6 +403,9 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 self.assertEqual(self.read_jsonl(paths["review_decisions"]), [])
                 self.assertEqual(self.read_jsonl(paths["approval_operations"]), [])
                 self.assertEqual(self.read_jsonl(paths["memory_records"]), [])
+                self.assertEqual(self.read_jsonl(paths["review_queue"]), [])
+                self.assertFalse(paths["memory_index"].exists())
+                self.assertFalse(paths["entity_index"].exists())
 
                 candidates = self.client.get("/knowledge/candidates")
                 self.assertEqual(candidates.status_code, 200)
@@ -441,18 +487,151 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 self.assertLess(below.json()["score"]["score"], 0.25)
                 self.assertEqual(self.read_jsonl(paths["candidates"]), [])
 
+                before_missing = self.store_bytes(paths)
                 missing = self.client.post(
                     "/knowledge/candidates/from-record",
                     json={"knowledge_record_id": "missing-record"},
                 )
 
-                self.assertEqual(missing.status_code, 200)
+                self.assertEqual(missing.status_code, 400)
+                self.assertEqual(missing.json(), {"detail": "knowledge_record_not_found"})
+                self.assert_no_store_mutation(before_missing, paths)
+
+    def test_missing_candidate_enqueue_returns_client_error_without_mutation(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                before = self.store_bytes(paths)
+
+                response = self.client.post(
+                    "/knowledge/candidates/missing-candidate/enqueue",
+                    json={"reviewed_by": "Test Oracle"},
+                )
+
+                self.assertEqual(response.status_code, 400)
                 self.assertEqual(
-                    missing.json(),
+                    response.json(),
+                    {"detail": "knowledge_candidate_not_found"},
+                )
+                self.assert_no_store_mutation(before, paths)
+
+    def test_missing_candidate_record_returns_client_error_without_initializing_stores(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                before = self.store_bytes(paths)
+
+                response = self.client.post(
+                    "/knowledge/candidates/from-record",
+                    json={"knowledge_record_id": "missing-record"},
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json(), {"detail": "knowledge_record_not_found"})
+                self.assert_no_store_mutation(before, paths)
+
+    def test_valid_candidate_enqueue_remains_successful_and_governed(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                record = self.ingest_eligible_record()["record"]
+                created = self.client.post(
+                    "/knowledge/candidates/from-record",
+                    json={"knowledge_record_id": record["record_id"]},
+                )
+                candidate = created.json()["candidate"]
+
+                response = self.client.post(
+                    f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                    json={"reviewed_by": "Test Oracle", "notes": "enqueue review"},
+                )
+
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                self.assertEqual(payload["status"], "success")
+                self.assertEqual(payload["candidate"]["review_status"], "candidate_queued")
+                self.assertEqual(
+                    payload["candidate"]["candidate_id"],
+                    candidate["candidate_id"],
+                )
+                self.assertEqual(len(self.read_jsonl(paths["review_queue"])), 1)
+                self.assertEqual(
+                    [item["review_status"] for item in self.read_jsonl(paths["candidates"])],
+                    ["candidate_created", "candidate_queued"],
+                )
+                self.assertEqual(self.read_jsonl(paths["approval_operations"]), [])
+                self.assertEqual(self.read_jsonl(paths["review_decisions"]), [])
+                self.assertEqual(self.read_jsonl(paths["memory_records"]), [])
+                self.assertFalse(paths["memory_index"].exists())
+                self.assertFalse(paths["entity_index"].exists())
+
+    def test_enqueue_candidate_event_failure_preserves_open_partial_write_defect(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                record = self.ingest_eligible_record()["record"]
+                created = self.client.post(
+                    "/knowledge/candidates/from-record",
+                    json={"knowledge_record_id": record["record_id"]},
+                )
+                candidate = created.json()["candidate"]
+                before_events = len(self.read_jsonl(paths["candidates"]))
+                before_reviews = len(self.read_jsonl(paths["review_queue"]))
+                before_operations = len(self.read_jsonl(paths["approval_operations"]))
+                before_decisions = len(self.read_jsonl(paths["review_decisions"]))
+                before_memory = len(self.read_jsonl(paths["memory_records"]))
+                index_before = self.store_bytes(
                     {
-                        "status": "error",
-                        "detail": "knowledge_record_not_found",
-                    },
+                        "memory_index": paths["memory_index"],
+                        "entity_index": paths["entity_index"],
+                    }
+                )
+
+                def fail_candidate_event(candidate_event):
+                    raise RuntimeError("simulated candidate event failure")
+
+                with patch.object(
+                    app.knowledge_ingest,
+                    "write_knowledge_candidate",
+                    side_effect=fail_candidate_event,
+                ):
+                    response = self.client.post(
+                        f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                        json={"reviewed_by": "Test Oracle"},
+                    )
+
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(len(self.read_jsonl(paths["candidates"])), before_events)
+                self.assertEqual(len(self.read_jsonl(paths["review_queue"])), before_reviews + 1)
+                self.assertEqual(
+                    len(self.read_jsonl(paths["approval_operations"])),
+                    before_operations,
+                )
+                self.assertEqual(
+                    len(self.read_jsonl(paths["review_decisions"])),
+                    before_decisions,
+                )
+                self.assertEqual(len(self.read_jsonl(paths["memory_records"])), before_memory)
+                self.assertEqual(
+                    self.store_bytes(
+                        {
+                            "memory_index": paths["memory_index"],
+                            "entity_index": paths["entity_index"],
+                        }
+                    ),
+                    index_before,
                 )
 
 
