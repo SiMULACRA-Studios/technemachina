@@ -42,6 +42,7 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
             "approval_operations": memory_dir / "approval_operations.jsonl",
             "memory_records": memory_dir / "memory_records.jsonl",
             "memory_index": memory_dir / "memory_index.json",
+            "entity_index": memory_dir / "entity_index.json",
         }
 
         patches = (
@@ -80,6 +81,12 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 "MEMORY_INDEX_PATH",
                 paths["memory_index"],
             ),
+            patch.object(app.memory_consolidation_worker, "MEMORY_DIR", memory_dir),
+            patch.object(
+                app.memory_consolidation_worker,
+                "ENTITY_INDEX_PATH",
+                paths["entity_index"],
+            ),
         )
 
         return paths, patches
@@ -93,6 +100,15 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+
+    def store_bytes(self, paths: dict[str, Path]):
+        return {
+            name: path.read_bytes() if path.exists() else None
+            for name, path in paths.items()
+        }
+
+    def assert_no_store_mutation(self, before: dict[str, bytes | None], paths: dict[str, Path]):
+        self.assertEqual(self.store_bytes(paths), before)
 
     def ingest_eligible_record(self):
         response = self.client.post(
@@ -130,6 +146,170 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 self.assertEqual(payload["record"]["lane"], "knowledge")
                 self.assertFalse(payload["record"]["memory_write_allowed"])
                 self.assertFalse(payload["record"]["candidate_path_allowed"])
+
+    def assert_whitespace_body_rejected_without_mutation(self, body: str):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                before = self.store_bytes(paths)
+
+                response = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Whitespace knowledge body",
+                        "body": body,
+                        "source_type": "text",
+                        "source_path": "/tmp/whitespace-body.md",
+                        "origin": "manual",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(
+                    response.json(),
+                    {"detail": "Knowledge body is empty."},
+                )
+                self.assertNotEqual(response.status_code, 200)
+                self.assertNotEqual(response.json().get("status"), "success")
+                self.assert_no_store_mutation(before, paths)
+                self.assertEqual(self.read_jsonl(paths["records"]), [])
+                self.assertEqual(self.read_jsonl(paths["candidates"]), [])
+                self.assertEqual(self.read_jsonl(paths["review_queue"]), [])
+                self.assertEqual(self.read_jsonl(paths["approval_operations"]), [])
+                self.assertEqual(self.read_jsonl(paths["review_decisions"]), [])
+                self.assertEqual(self.read_jsonl(paths["memory_records"]), [])
+                self.assertFalse(paths["memory_index"].exists())
+                self.assertFalse(paths["entity_index"].exists())
+
+    def test_single_space_body_returns_validation_error_without_mutation(self):
+        self.assert_whitespace_body_rejected_without_mutation(" ")
+
+    def test_multi_space_body_returns_validation_error_without_mutation(self):
+        self.assert_whitespace_body_rejected_without_mutation("     ")
+
+    def test_tab_only_body_returns_validation_error_without_mutation(self):
+        self.assert_whitespace_body_rejected_without_mutation("\t")
+
+    def test_newline_only_body_returns_validation_error_without_mutation(self):
+        self.assert_whitespace_body_rejected_without_mutation("\n")
+
+    def test_mixed_ascii_whitespace_body_returns_validation_error_without_mutation(self):
+        self.assert_whitespace_body_rejected_without_mutation(" \t\n ")
+
+    def test_literal_empty_and_missing_body_remain_validation_errors(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                before = self.store_bytes(paths)
+
+                literal_empty = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Literal empty body",
+                        "body": "",
+                        "source_type": "text",
+                        "source_path": "/tmp/literal-empty.md",
+                        "origin": "manual",
+                    },
+                )
+                missing_body = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Missing body",
+                        "source_type": "text",
+                        "source_path": "/tmp/missing-body.md",
+                        "origin": "manual",
+                    },
+                )
+
+                self.assertEqual(literal_empty.status_code, 422)
+                self.assertEqual(missing_body.status_code, 422)
+                self.assert_no_store_mutation(before, paths)
+
+    def test_duplicate_and_search_behavior_are_preserved(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "Duplicate doctrine body must preserve exact hash behavior."
+                first = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Duplicate source",
+                        "body": body,
+                        "source_type": "text",
+                        "source_path": "/tmp/duplicate-a.md",
+                        "origin": "manual",
+                    },
+                )
+                duplicate = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Duplicate source copy",
+                        "body": body,
+                        "source_type": "text",
+                        "source_path": "/tmp/duplicate-b.md",
+                        "origin": "manual",
+                    },
+                )
+
+                self.assertEqual(first.status_code, 200)
+                self.assertEqual(first.json()["status"], "success")
+                self.assertEqual(duplicate.status_code, 200)
+                self.assertEqual(duplicate.json()["status"], "duplicate")
+                self.assertEqual(
+                    duplicate.json()["duplicate_reason"],
+                    "exact_content_hash_match",
+                )
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 2)
+
+                default_search = self.client.get(
+                    "/knowledge/search",
+                    params={"query": "duplicate doctrine"},
+                )
+                duplicate_search = self.client.get(
+                    "/knowledge/search",
+                    params={
+                        "query": "duplicate doctrine",
+                        "include_duplicates": True,
+                    },
+                )
+
+                self.assertEqual(default_search.status_code, 200)
+                self.assertEqual(default_search.json()["returned_count"], 1)
+                self.assertEqual(default_search.json()["skipped"]["duplicates"], 1)
+                self.assertEqual(duplicate_search.status_code, 200)
+                self.assertEqual(duplicate_search.json()["returned_count"], 2)
+
+    def test_large_valid_ingest_still_succeeds(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                response = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Large body",
+                        "body": "x" * 100000,
+                        "source_type": "text",
+                        "source_path": "/tmp/large-body.md",
+                        "origin": "manual",
+                    },
+                )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["status"], "success")
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 1)
 
     def test_public_from_record_endpoint_creates_governed_candidate(self):
         with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:

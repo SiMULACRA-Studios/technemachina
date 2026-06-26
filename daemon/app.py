@@ -265,6 +265,9 @@ async def knowledge_records(limit: int = 100, include_inactive: bool = False):
 
 @app.post("/knowledge/ingest-text")
 async def knowledge_ingest_text(req: KnowledgeIngestTextRequest):
+    if not knowledge_ingest.normalize_text(req.body):
+        raise HTTPException(status_code=422, detail="Knowledge body is empty.")
+
     try:
         return knowledge_ingest.ingest_text(
             title=req.title,
