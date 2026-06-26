@@ -139,6 +139,20 @@ class KnowledgeCandidateCreateRequest(BaseModel):
     created_by: str = "Oracle"
     force: bool = False
 
+
+def _memory_record_exists_read_only(record_id: str) -> bool:
+    if not memory_taxonomy.MEMORY_RECORDS_PATH.exists():
+        return False
+
+    for line in memory_taxonomy.MEMORY_RECORDS_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        record = json.loads(line)
+        if record.get("record_id") == record_id:
+            return True
+
+    return False
+
 class KnowledgeCandidateEnqueueRequest(BaseModel):
     reviewed_by: str = "Oracle"
     notes: str = ""
@@ -401,8 +415,18 @@ async def memory_review_enqueue(req: MemoryReviewCreateRequest):
 async def memory_review_get(review_id: str):
     item = memory_review_queue.get_review_item(review_id)
     if not item:
-        return {"status": "error", "detail": "review_not_found"}
+        raise HTTPException(status_code=404, detail="review_not_found")
     return {"status": "success", "review": item}
+
+
+def _memory_review_success(result: dict | None) -> dict:
+    if not result:
+        raise HTTPException(status_code=404, detail="review_not_found")
+    return {"status": "success", **result}
+
+
+def _memory_review_transition_conflict(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=409, detail="invalid_review_transition")
 
 
 @app.post("/memory/review/{review_id}/approve")
@@ -413,11 +437,11 @@ async def memory_review_approve(review_id: str, req: MemoryReviewDecisionRequest
             reviewed_by=req.reviewed_by,
             notes=req.notes,
         )
-        if not result:
-            return {"status": "error", "detail": "review_not_found"}
-        return {"status": "success", **result}
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
+        return _memory_review_success(result)
+    except memory_review_queue.ApprovalStateConflict as exc:
+        raise HTTPException(status_code=409, detail="approval_state_conflict") from exc
+    except ValueError as exc:
+        raise _memory_review_transition_conflict(exc) from exc
 
 
 @app.post("/memory/review/{review_id}/reject")
@@ -428,11 +452,9 @@ async def memory_review_reject(review_id: str, req: MemoryReviewDecisionRequest)
             reviewed_by=req.reviewed_by,
             notes=req.notes,
         )
-        if not result:
-            return {"status": "error", "detail": "review_not_found"}
-        return {"status": "success", **result}
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
+        return _memory_review_success(result)
+    except ValueError as exc:
+        raise _memory_review_transition_conflict(exc) from exc
 
 
 @app.post("/memory/review/{review_id}/defer")
@@ -443,11 +465,9 @@ async def memory_review_defer(review_id: str, req: MemoryReviewDecisionRequest):
             reviewed_by=req.reviewed_by,
             notes=req.notes,
         )
-        if not result:
-            return {"status": "error", "detail": "review_not_found"}
-        return {"status": "success", **result}
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
+        return _memory_review_success(result)
+    except ValueError as exc:
+        raise _memory_review_transition_conflict(exc) from exc
 
 
 @app.post("/memory/review/{review_id}/edit")
@@ -459,11 +479,9 @@ async def memory_review_edit(review_id: str, req: MemoryReviewEditRequest):
             reviewed_by=req.reviewed_by,
             notes=req.notes,
         )
-        if not result:
-            return {"status": "error", "detail": "review_not_found"}
-        return {"status": "success", **result}
-    except Exception as exc:
-        return {"status": "error", "detail": str(exc)}
+        return _memory_review_success(result)
+    except ValueError as exc:
+        raise _memory_review_transition_conflict(exc) from exc
 
 
 @app.post("/memory/consolidate")
@@ -567,9 +585,12 @@ async def create_memory_record_endpoint(req: MemoryRecordRequest):
 
 @app.post("/memory/{record_id}/revoke")
 async def revoke_memory_endpoint(record_id: str, req: MemoryRevokeRequest):
+    if not _memory_record_exists_read_only(record_id):
+        raise HTTPException(status_code=404, detail="memory_not_found")
+
     record = memory_taxonomy.revoke_memory(record_id, reason=req.reason)
     if not record:
-        return {"status": "error", "detail": "memory_not_found"}
+        raise HTTPException(status_code=404, detail="memory_not_found")
     return {"status": "success", "record": record}
 
 

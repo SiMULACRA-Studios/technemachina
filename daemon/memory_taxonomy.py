@@ -200,7 +200,7 @@ def load_records(include_revoked: bool = False):
         if not line.strip():
             continue
         record = json.loads(line)
-        if not include_revoked and record.get("status") == "revoked":
+        if not include_revoked and record.get("status") != "active":
             continue
         records.append(record)
 
@@ -211,7 +211,7 @@ def rebuild_index():
     all_records = load_records(include_revoked=True)
     index = empty_index()
 
-    active_records = [r for r in all_records if r.get("status") != "revoked"]
+    active_records = [r for r in all_records if r.get("status") == "active"]
     revoked_records = [r for r in all_records if r.get("status") == "revoked"]
 
     index["record_count"] = len(active_records)

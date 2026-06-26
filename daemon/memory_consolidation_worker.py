@@ -145,12 +145,24 @@ def write_journal_entry(
     return entry
 
 
-def rebuild_entity_index(records: list[dict] | None = None):
-    ensure_worker_store()
+def load_records_read_only(include_revoked: bool = False) -> list[dict]:
+    if not memory_taxonomy.MEMORY_RECORDS_PATH.exists():
+        return []
 
-    if records is None:
-        records = memory_taxonomy.load_records(include_revoked=False)
+    records = []
+    for line in memory_taxonomy.MEMORY_RECORDS_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
 
+        record = json.loads(line)
+        if not include_revoked and record.get("status") == "revoked":
+            continue
+        records.append(record)
+
+    return records
+
+
+def build_entity_index(records: list[dict]) -> dict:
     entities = {}
 
     for record in records:
@@ -187,6 +199,16 @@ def rebuild_entity_index(records: list[dict] | None = None):
         "entities": entities,
     }
 
+    return index
+
+
+def rebuild_entity_index(records: list[dict] | None = None):
+    ensure_worker_store()
+
+    if records is None:
+        records = memory_taxonomy.load_records(include_revoked=False)
+
+    index = build_entity_index(records)
     ENTITY_INDEX_PATH.write_text(json.dumps(index, indent=2, ensure_ascii=False), encoding="utf-8")
     return index
 
@@ -298,12 +320,18 @@ def find_refresh_candidates(records: list[dict]):
 
 
 def consolidate_memory(dry_run: bool = True, limit: int = 50):
-    ensure_worker_store()
+    if dry_run:
+        records = load_records_read_only(include_revoked=True)
+    else:
+        ensure_worker_store()
+        records = memory_taxonomy.load_records(include_revoked=True)
 
-    records = memory_taxonomy.load_records(include_revoked=True)
-    active_records = [r for r in records if r.get("status") != "revoked"]
+    active_records = [r for r in records if r.get("status") == "active"]
 
-    entity_index = rebuild_entity_index(active_records)
+    if dry_run:
+        entity_index = build_entity_index(active_records)
+    else:
+        entity_index = rebuild_entity_index(active_records)
 
     proposals = []
     proposals.extend(find_merge_candidates(active_records))
