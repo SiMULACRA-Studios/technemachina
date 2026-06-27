@@ -1,4 +1,5 @@
 import json
+import inspect
 import sys
 import tempfile
 import unittest
@@ -36,6 +37,7 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
             "records": knowledge_dir / "knowledge_records.jsonl",
             "sources": knowledge_dir / "knowledge_sources.json",
             "candidates": knowledge_dir / "knowledge_candidates.jsonl",
+            "operations": knowledge_dir / "knowledge_operations.json",
             "memory_dir": memory_dir,
             "review_queue": memory_dir / "review_queue.jsonl",
             "review_decisions": memory_dir / "review_decisions.jsonl",
@@ -53,6 +55,11 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 app.knowledge_ingest,
                 "KNOWLEDGE_CANDIDATES_PATH",
                 paths["candidates"],
+            ),
+            patch.object(
+                app.knowledge_operations,
+                "OPERATIONS_PATH",
+                paths["operations"],
             ),
             patch.object(app.memory_review_queue, "MEMORY_DIR", memory_dir),
             patch.object(
@@ -100,6 +107,12 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+
+    def read_operations(self, path: Path):
+        if not path.exists():
+            return []
+
+        return json.loads(path.read_text(encoding="utf-8")).get("operations", [])
 
     def store_bytes(self, paths: dict[str, Path]):
         snapshot = {}
@@ -574,7 +587,338 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 self.assertFalse(paths["memory_index"].exists())
                 self.assertFalse(paths["entity_index"].exists())
 
-    def test_enqueue_candidate_event_failure_preserves_open_partial_write_defect(self):
+    def test_binding_safety_and_operation_helpers_avoid_candidate_builder_alias(self):
+        self.assertEqual(
+            str(inspect.signature(app.knowledge_ingest.register_source)),
+            "(*, source_title: 'str', source_type: 'str', source_path: 'str', origin: 'str', tags: 'list[str]', hash_value: 'str', duplicate_of: 'str | None' = None, duplicate_reason: 'str' = '') -> 'dict[str, Any]'",
+        )
+        self.assertEqual(app.knowledge_ingest.ensure_store.__code__.co_firstlineno, 60)
+        self.assertEqual(app.knowledge_ingest.save_sources.__code__.co_firstlineno, 111)
+        self.assertEqual(app.knowledge_ingest.write_record.__code__.co_firstlineno, 139)
+        self.assertEqual(app.knowledge_ingest.write_knowledge_candidate.__code__.co_firstlineno, 1273)
+        self.assertIn("_write_sources_atomically", app.knowledge_ingest.ensure_store.__code__.co_names)
+        self.assertIn("_write_sources_atomically", app.knowledge_ingest.save_sources.__code__.co_names)
+        self.assertIn("_append_jsonl_line_durably", app.knowledge_ingest.write_record.__code__.co_names)
+        self.assertIn(
+            "_append_jsonl_line_durably",
+            app.knowledge_ingest.write_knowledge_candidate.__code__.co_names,
+        )
+        self.assertIn(
+            "_previous_build_candidate_from_knowledge_v028c1b",
+            app.knowledge_ingest.build_candidate_from_knowledge.__code__.co_names,
+        )
+
+        forbidden = "_previous_build_candidate_from_knowledge_v028c1b"
+        for name, helper in inspect.getmembers(app.knowledge_ingest, inspect.isfunction):
+            if "operation" not in name and "source_registry" not in name and "enqueue" not in name:
+                continue
+            if name == "build_candidate_from_knowledge":
+                continue
+
+            self.assertNotIn(forbidden, helper.__code__.co_names, name)
+            self.assertNotIn(forbidden, inspect.getsource(helper), name)
+            self.assertNotIn(forbidden, repr(helper.__defaults__), name)
+            self.assertNotIn(forbidden, repr(helper.__kwdefaults__), name)
+            self.assertIsNone(helper.__closure__, name)
+
+    def test_source_registry_initialization_and_save_are_atomic(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                app.knowledge_ingest.ensure_store()
+                self.assertTrue(paths["sources"].exists())
+                self.assertEqual(json.loads(paths["sources"].read_text())["sources"], {})
+
+                before = paths["sources"].read_bytes()
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_write_sources_atomically",
+                    side_effect=RuntimeError("atomic source save failed"),
+                ):
+                    with self.assertRaises(RuntimeError):
+                        app.knowledge_ingest.save_sources({"created_at": "x", "sources": {"bad": {}}})
+
+                self.assertEqual(paths["sources"].read_bytes(), before)
+                self.assertEqual(json.loads(paths["sources"].read_text())["sources"], {})
+
+    def test_prepare_failure_creates_no_domain_objects(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                with patch.object(
+                    app.knowledge_operations,
+                    "prepare_operation",
+                    side_effect=RuntimeError("prepare failed"),
+                ):
+                    response = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Prepare failure",
+                            "body": "prepare failure body",
+                            "source_type": "text",
+                            "source_path": "/tmp/prepare-failure.md",
+                            "origin": "manual",
+                        },
+                    )
+
+                self.assertEqual(response.status_code, 500)
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 0)
+                self.assertEqual(len(self.read_jsonl(paths["candidates"])), 0)
+                sources = json.loads(paths["sources"].read_text(encoding="utf-8"))
+                self.assertEqual(sources["sources"], {})
+                self.assertEqual(self.read_operations(paths["operations"]), [])
+
+    def test_source_registration_orphan_recovers_on_retry(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                with patch.object(
+                    app.knowledge_ingest,
+                    "write_record",
+                    side_effect=RuntimeError("record write failed"),
+                ):
+                    failed = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Recoverable source",
+                            "body": "recoverable source doctrine",
+                            "source_type": "text",
+                            "source_path": "/tmp/recoverable-source.md",
+                            "origin": "manual",
+                        },
+                    )
+
+                self.assertEqual(failed.status_code, 500)
+                self.assertEqual(len(json.loads(paths["sources"].read_text())["sources"]), 1)
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 0)
+                operations = self.read_operations(paths["operations"])
+                self.assertEqual(len(operations), 1)
+                self.assertEqual(operations[0]["state"], "in_progress")
+                self.assertIn("source_durable", operations[0]["effect_progress"])
+                intended_record_id = operations[0]["intended_identities"]["record_id"]
+
+                retry = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Recoverable source",
+                        "body": "recoverable source doctrine",
+                        "source_type": "text",
+                        "source_path": "/tmp/recoverable-source.md",
+                        "origin": "manual",
+                    },
+                )
+
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(retry.json()["record"]["record_id"], intended_record_id)
+                self.assertEqual(len(json.loads(paths["sources"].read_text())["sources"]), 1)
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 1)
+                completed = self.read_operations(paths["operations"])[0]
+                self.assertEqual(completed["state"], "complete")
+                self.assertIn("record_durable", completed["effect_progress"])
+
+    def test_record_progress_and_completion_failures_recover_without_duplicates(self):
+        for patched_name in ("record_operation_progress", "complete_operation"):
+            with self.subTest(patched_name=patched_name):
+                with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+                    paths, patches = self.isolated_stores(tempdir)
+                    with ExitStack() as stack:
+                        for item in patches:
+                            stack.enter_context(item)
+
+                        real = getattr(app.knowledge_operations, patched_name)
+                        calls = {"count": 0}
+
+                        def fail_once(*args, **kwargs):
+                            calls["count"] += 1
+                            if calls["count"] == 1:
+                                raise RuntimeError(f"{patched_name} failed")
+                            return real(*args, **kwargs)
+
+                        with patch.object(app.knowledge_operations, patched_name, side_effect=fail_once):
+                            failed = self.client.post(
+                                "/knowledge/ingest-text",
+                                json={
+                                    "title": f"{patched_name} recovery",
+                                    "body": f"{patched_name} recovery doctrine",
+                                    "source_type": "text",
+                                    "source_path": f"/tmp/{patched_name}.md",
+                                    "origin": "manual",
+                                },
+                            )
+
+                        self.assertEqual(failed.status_code, 500)
+                        retry = self.client.post(
+                            "/knowledge/ingest-text",
+                            json={
+                                "title": f"{patched_name} recovery",
+                                "body": f"{patched_name} recovery doctrine",
+                                "source_type": "text",
+                                "source_path": f"/tmp/{patched_name}.md",
+                                "origin": "manual",
+                            },
+                        )
+
+                        self.assertEqual(retry.status_code, 200)
+                        self.assertEqual(len(self.read_jsonl(paths["records"])), 1)
+                        self.assertEqual(len(json.loads(paths["sources"].read_text())["sources"]), 1)
+                        self.assertEqual(self.read_operations(paths["operations"])[0]["state"], "complete")
+
+    def test_duplicate_source_and_event_persist_atomically(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "duplicate atomic body"
+                first = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={"title": "Source A", "body": body, "source_type": "text", "source_path": "/tmp/a.md"},
+                )
+                duplicate = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={"title": "Source B", "body": body, "source_type": "text", "source_path": "/tmp/b.md"},
+                )
+
+                self.assertEqual(first.status_code, 200)
+                self.assertEqual(duplicate.status_code, 200)
+                registry = json.loads(paths["sources"].read_text())
+                duplicate_source_id = duplicate.json()["source"]["source_id"]
+                events = [
+                    event
+                    for event in registry.get("duplicate_events", [])
+                    if event["source_id"] == duplicate_source_id
+                ]
+                self.assertEqual(len(events), 1)
+                self.assertEqual(events[0]["duplicate_reason"], "exact_content_hash_match")
+
+    def test_duplicate_source_missing_event_conflicts_on_retry(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "duplicate conflict body"
+                first = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={"title": "Source A", "body": body, "source_type": "text", "source_path": "/tmp/a.md"},
+                )
+                self.assertEqual(first.status_code, 200)
+
+                with patch.object(
+                    app.knowledge_operations,
+                    "record_operation_progress",
+                    side_effect=RuntimeError("progress failed"),
+                ):
+                    failed = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={"title": "Source B", "body": body, "source_type": "text", "source_path": "/tmp/b.md"},
+                    )
+                self.assertEqual(failed.status_code, 500)
+
+                registry = json.loads(paths["sources"].read_text())
+                registry["duplicate_events"] = []
+                paths["sources"].write_text(json.dumps(registry), encoding="utf-8")
+
+                retry = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={"title": "Source B", "body": body, "source_type": "text", "source_path": "/tmp/b.md"},
+                )
+                self.assertEqual(retry.status_code, 409)
+                self.assertEqual(retry.json(), {"detail": "knowledge_operation_conflict"})
+
+    def test_record_fsync_failure_is_retried_without_new_record_id(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                real_append = app.knowledge_ingest._append_jsonl_line_durably
+
+                def fail_record_append(path, payload):
+                    if path == paths["records"]:
+                        raise RuntimeError("record fsync failed")
+                    return real_append(path, payload)
+
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_append_jsonl_line_durably",
+                    side_effect=fail_record_append,
+                ):
+                    failed = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Record fsync",
+                            "body": "record fsync doctrine",
+                            "source_type": "text",
+                            "source_path": "/tmp/record-fsync.md",
+                            "origin": "manual",
+                        },
+                    )
+
+                self.assertEqual(failed.status_code, 500)
+                operation = self.read_operations(paths["operations"])[0]
+                self.assertNotIn("record_durable", operation["effect_progress"])
+                intended_record_id = operation["intended_identities"]["record_id"]
+
+                with patch.object(
+                    app.knowledge_ingest,
+                    "make_record_id",
+                    side_effect=AssertionError("record ID must be reused"),
+                ):
+                    retry = self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Record fsync",
+                            "body": "record fsync doctrine",
+                            "source_type": "text",
+                            "source_path": "/tmp/record-fsync.md",
+                            "origin": "manual",
+                        },
+                    )
+
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(retry.json()["record"]["record_id"], intended_record_id)
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 1)
+
+    def test_duplicate_record_id_conflicts_without_persistent_index(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                first = self.client.post(
+                    "/knowledge/ingest-text",
+                    json={
+                        "title": "Conflict record",
+                        "body": "conflict record body",
+                        "source_type": "text",
+                        "source_path": "/tmp/conflict-record.md",
+                    },
+                )
+                self.assertEqual(first.status_code, 200)
+                record = first.json()["record"]
+                with paths["records"].open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record) + "\n")
+
+                with self.assertRaises(app.knowledge_operations.KnowledgeOperationConflict):
+                    app.knowledge_ingest.find_record_by_id(record["record_id"])
+
+                self.assertFalse((paths["knowledge_dir"] / "record_index.json").exists())
+
+    def test_enqueue_candidate_event_failure_recovers_on_retry(self):
         with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
             paths, patches = self.isolated_stores(tempdir)
             with ExitStack() as stack:
@@ -615,6 +959,11 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 500)
                 self.assertEqual(len(self.read_jsonl(paths["candidates"])), before_events)
                 self.assertEqual(len(self.read_jsonl(paths["review_queue"])), before_reviews + 1)
+                operation = self.read_operations(paths["operations"])[-1]
+                self.assertEqual(operation["operation_kind"], "knowledge_candidate_enqueue")
+                self.assertEqual(operation["state"], "in_progress")
+                self.assertIn("review_durable", operation["effect_progress"])
+                self.assertNotIn("candidate_event_durable", operation["effect_progress"])
                 self.assertEqual(
                     len(self.read_jsonl(paths["approval_operations"])),
                     before_operations,
@@ -633,6 +982,153 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                     ),
                     index_before,
                 )
+
+                retry = self.client.post(
+                    f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                    json={"reviewed_by": "Test Oracle"},
+                )
+
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(len(self.read_jsonl(paths["review_queue"])), before_reviews + 1)
+                self.assertEqual(len(self.read_jsonl(paths["candidates"])), before_events + 1)
+                self.assertEqual(
+                    [item["review_status"] for item in self.read_jsonl(paths["candidates"])],
+                    ["candidate_created", "candidate_queued"],
+                )
+                self.assertEqual(self.read_operations(paths["operations"])[-1]["state"], "complete")
+
+    def test_candidate_event_fsync_failure_and_completion_failure_recover(self):
+        for patched_name in ("_append_jsonl_line_durably", "complete_operation"):
+            with self.subTest(patched_name=patched_name):
+                with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+                    paths, patches = self.isolated_stores(tempdir)
+                    with ExitStack() as stack:
+                        for item in patches:
+                            stack.enter_context(item)
+
+                        record = self.ingest_eligible_record()["record"]
+                        created = self.client.post(
+                            "/knowledge/candidates/from-record",
+                            json={"knowledge_record_id": record["record_id"]},
+                        )
+                        candidate = created.json()["candidate"]
+
+                        if patched_name == "_append_jsonl_line_durably":
+                            real_append = app.knowledge_ingest._append_jsonl_line_durably
+
+                            def fail_candidate_append(path, payload):
+                                if path == paths["candidates"] and payload.get("review_status") == "candidate_queued":
+                                    raise RuntimeError("candidate fsync failed")
+                                return real_append(path, payload)
+
+                            patcher = patch.object(
+                                app.knowledge_ingest,
+                                "_append_jsonl_line_durably",
+                                side_effect=fail_candidate_append,
+                            )
+                        else:
+                            real_complete = app.knowledge_operations.complete_operation
+                            calls = {"count": 0}
+
+                            def fail_complete_once(*args, **kwargs):
+                                calls["count"] += 1
+                                if calls["count"] == 1:
+                                    raise RuntimeError("completion failed")
+                                return real_complete(*args, **kwargs)
+
+                            patcher = patch.object(
+                                app.knowledge_operations,
+                                "complete_operation",
+                                side_effect=fail_complete_once,
+                            )
+
+                        with patcher:
+                            failed = self.client.post(
+                                f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                                json={"reviewed_by": "Test Oracle"},
+                            )
+
+                        self.assertEqual(failed.status_code, 500)
+                        retry = self.client.post(
+                            f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                            json={"reviewed_by": "Test Oracle"},
+                        )
+
+                        self.assertEqual(retry.status_code, 200)
+                        self.assertEqual(len(self.read_jsonl(paths["review_queue"])), 1)
+                        self.assertEqual(
+                            [item["review_status"] for item in self.read_jsonl(paths["candidates"])],
+                            ["candidate_created", "candidate_queued"],
+                        )
+                        self.assertEqual(self.read_operations(paths["operations"])[-1]["state"], "complete")
+
+    def test_review_ambiguity_and_source_refs_only_collision_conflict(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                record = self.ingest_eligible_record()["record"]
+                created = self.client.post(
+                    "/knowledge/candidates/from-record",
+                    json={"knowledge_record_id": record["record_id"]},
+                )
+                candidate = created.json()["candidate"]
+                app.memory_review_queue.create_review_item(
+                    candidate_record={"title": "collision"},
+                    source_refs=[candidate["candidate_id"]],
+                    original_record={"candidate_id": "other-candidate"},
+                )
+                response = self.client.post(
+                    f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                    json={"reviewed_by": "Test Oracle"},
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(len(self.read_jsonl(paths["review_queue"])), 2)
+
+                # Two canonical pending matches are ambiguous and must fail closed.
+                app.memory_review_queue.create_review_item(
+                    candidate_record={"title": "duplicate canonical"},
+                    original_record=candidate,
+                )
+                conflict = self.client.post(
+                    f"/knowledge/candidates/{candidate['candidate_id']}/enqueue",
+                    json={"reviewed_by": "Test Oracle"},
+                )
+                self.assertEqual(conflict.status_code, 409)
+                self.assertEqual(conflict.json(), {"detail": "knowledge_operation_conflict"})
+
+    def test_operation_inventory_reports_detectable_pending_and_completed_state(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                with patch.object(
+                    app.knowledge_ingest,
+                    "write_record",
+                    side_effect=RuntimeError("record write failed"),
+                ):
+                    self.client.post(
+                        "/knowledge/ingest-text",
+                        json={
+                            "title": "Inventory",
+                            "body": "inventory doctrine",
+                            "source_type": "text",
+                            "source_path": "/tmp/inventory.md",
+                        },
+                    )
+
+                inventory = self.client.get("/knowledge/operations")
+                self.assertEqual(inventory.status_code, 200)
+                self.assertEqual(inventory.json()["counts"]["pending"], 1)
+                item = inventory.json()["operations"][0]
+                self.assertEqual(item["operation_kind"], "knowledge_ingest")
+                self.assertTrue(item["intended_source_id"])
+                self.assertTrue(item["intended_record_id"])
+                self.assertIn("source_durable", item["effect_progress"])
 
 
 if __name__ == "__main__":

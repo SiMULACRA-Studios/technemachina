@@ -24,6 +24,7 @@ import memory_retrieval
 import memory_consolidation_worker
 import memory_review_queue
 import knowledge_ingest
+import knowledge_operations
 import synapse_map
 import synapse_analysis
 
@@ -279,6 +280,8 @@ async def knowledge_ingest_text(req: KnowledgeIngestTextRequest):
             created_by=req.created_by,
             provenance=req.provenance,
         )
+    except knowledge_operations.KnowledgeOperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -330,6 +333,11 @@ async def knowledge_candidates_bridge_status():
     return knowledge_ingest.knowledge_bridge_status()
 
 
+@app.get("/knowledge/operations")
+async def knowledge_operations_status():
+    return knowledge_operations.operation_inventory()
+
+
 @app.post("/knowledge/candidates/from-record")
 async def knowledge_candidate_from_record(req: KnowledgeCandidateCreateRequest):
     if not knowledge_ingest.RECORDS_PATH.exists():
@@ -342,6 +350,8 @@ async def knowledge_candidate_from_record(req: KnowledgeCandidateCreateRequest):
             reason=req.reason,
             force=req.force,
         )
+    except knowledge_operations.KnowledgeOperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -357,6 +367,8 @@ async def knowledge_candidate_enqueue(candidate_id: str, req: KnowledgeCandidate
             reviewed_by=req.reviewed_by,
             notes=req.notes,
         )
+    except knowledge_operations.KnowledgeOperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
