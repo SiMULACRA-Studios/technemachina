@@ -426,12 +426,21 @@ def _refresh_ingest_intent_if_needed(
 
     registry = load_sources()
     old_payloads = operation["intended_effect_payloads"]
-    if _source_registry_effect_matches(
-        registry,
-        old_payloads["source"],
-        old_payloads.get("duplicate_event"),
-    ):
-        return operation
+    try:
+        if _source_registry_effect_matches(
+            registry,
+            old_payloads["source"],
+            old_payloads.get("duplicate_event"),
+        ):
+            return operation
+    except knowledge_operations.KnowledgeOperationConflict:
+        # A pending non-duplicate may have its deterministic source ID taken by
+        # a later canonical source before its own source effect is durable. In
+        # that case the next duplicate re-evaluation must refresh the pending
+        # operation to a duplicate intent instead of treating the canonical
+        # source as this operation's conflicting final effect.
+        if old_payloads.get("duplicate_event") is not None:
+            raise
 
     hash_value = content_hash(normalized_body)
     duplicate = find_duplicate_source(hash_value, source_path=source_path, source_title=title)

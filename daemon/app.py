@@ -335,7 +335,11 @@ async def knowledge_candidates_bridge_status():
 
 @app.get("/knowledge/operations")
 async def knowledge_operations_status():
-    return knowledge_operations.operation_inventory()
+    inventory = knowledge_operations.operation_inventory()
+    return {
+        "counts": inventory.get("counts", {}),
+        "operations": inventory.get("operations", []),
+    }
 
 
 @app.post("/knowledge/candidates/from-record")

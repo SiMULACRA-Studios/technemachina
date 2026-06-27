@@ -114,6 +114,100 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
 
         return json.loads(path.read_text(encoding="utf-8")).get("operations", [])
 
+    def read_sources(self, path: Path):
+        if not path.exists():
+            return {"sources": {}}
+
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def post_text(self, title: str, body: str, source_path: str):
+        return self.client.post(
+            "/knowledge/ingest-text",
+            json={
+                "title": title,
+                "body": body,
+                "source_type": "text",
+                "source_path": source_path,
+                "origin": "manual",
+                "tags": [],
+                "created_by": "Test Oracle",
+                "provenance": "Isolated knowledge-ingest regression fixture.",
+            },
+        )
+
+    def assert_no_sensitive_operation_fields(self, payload):
+        forbidden_keys = {
+            "path",
+            "source_path",
+            "request_fingerprint",
+            "content_hash",
+            "canonical_inputs",
+            "canonical_request_inputs",
+            "intended_source_payload",
+            "intended_record_payload",
+            "intended_duplicate_event_payload",
+        }
+
+        def walk(value):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    self.assertNotIn(key, forbidden_keys)
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+            elif isinstance(value, str):
+                self.assertFalse(Path(value).is_absolute(), value)
+
+        walk(payload)
+
+    def assert_ingest_source_record_coherence(
+        self,
+        paths: dict[str, Path],
+        *,
+        expected_duplicate: bool,
+        excluded_source_id: str | None = None,
+        operation_index: int = -1,
+    ):
+        operation = self.read_operations(paths["operations"])[operation_index]
+        registry = self.read_sources(paths["sources"])
+        records = self.read_jsonl(paths["records"])
+        source_id = operation["intended_identities"]["source_id"]
+        source_payload = operation["intended_effect_payloads"]["source"]
+        record_payload = operation["intended_effect_payloads"]["record"]
+        durable_source = registry["sources"][source_id]
+        durable_record = next(
+            record
+            for record in records
+            if record["record_id"] == record_payload["record_id"]
+        )
+
+        self.assertEqual(source_id, source_payload["source_id"])
+        self.assertEqual(source_id, record_payload["source_id"])
+        self.assertEqual(source_id, durable_source["source_id"])
+        self.assertEqual(source_id, durable_record["source_id"])
+        if excluded_source_id is not None:
+            self.assertNotEqual(durable_record["source_id"], excluded_source_id)
+        if expected_duplicate:
+            self.assertTrue(source_id.startswith("ksrc_dup_"))
+            events = [
+                event
+                for event in registry.get("duplicate_events", [])
+                if event["source_id"] == source_id
+            ]
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["duplicate_of"], durable_source["duplicate_of"])
+        else:
+            self.assertFalse(source_id.startswith("ksrc_dup_"))
+            self.assertIsNone(durable_source["duplicate_of"])
+            self.assertEqual(durable_source["duplicate_reason"], "")
+            self.assertEqual(record_payload["duplicate_reason"], "")
+            self.assertEqual(record_payload["duplicate_of"], None)
+            self.assertFalse(registry.get("duplicate_events", []))
+
+        self.assertEqual(operation["state"], "complete")
+        return operation, durable_source, durable_record
+
     def store_bytes(self, paths: dict[str, Path]):
         snapshot = {}
 
@@ -595,7 +689,7 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
         self.assertEqual(app.knowledge_ingest.ensure_store.__code__.co_firstlineno, 60)
         self.assertEqual(app.knowledge_ingest.save_sources.__code__.co_firstlineno, 111)
         self.assertEqual(app.knowledge_ingest.write_record.__code__.co_firstlineno, 139)
-        self.assertEqual(app.knowledge_ingest.write_knowledge_candidate.__code__.co_firstlineno, 1273)
+        self.assertEqual(app.knowledge_ingest.write_knowledge_candidate.__code__.co_firstlineno, 1282)
         self.assertIn("_write_sources_atomically", app.knowledge_ingest.ensure_store.__code__.co_names)
         self.assertIn("_write_sources_atomically", app.knowledge_ingest.save_sources.__code__.co_names)
         self.assertIn("_append_jsonl_line_durably", app.knowledge_ingest.write_record.__code__.co_names)
@@ -836,6 +930,193 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 )
                 self.assertEqual(retry.status_code, 409)
                 self.assertEqual(retry.json(), {"detail": "knowledge_operation_conflict"})
+
+    def test_pending_nonduplicate_becoming_duplicate_recovers_with_refreshed_record_source(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "pending transition duplicate body"
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_persist_operation_source_registry_effect",
+                    side_effect=RuntimeError("source effect held"),
+                ):
+                    original = self.post_text("Original", body, "/tmp/original.md")
+
+                self.assertEqual(original.status_code, 500)
+                pending = self.read_operations(paths["operations"])[0]
+                obsolete_source_id = pending["intended_identities"]["source_id"]
+                self.assertFalse(obsolete_source_id.startswith("ksrc_dup_"))
+
+                intervening = self.post_text("Intervening", body, "/tmp/intervening.md")
+                self.assertEqual(intervening.status_code, 200)
+                self.assertEqual(intervening.json()["source"]["source_id"], obsolete_source_id)
+
+                retry = self.post_text("Original", body, "/tmp/original.md")
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(retry.json()["status"], "duplicate")
+
+                operation, durable_source, durable_record = self.assert_ingest_source_record_coherence(
+                    paths,
+                    expected_duplicate=True,
+                    excluded_source_id=obsolete_source_id,
+                    operation_index=0,
+                )
+                self.assertEqual(durable_source["duplicate_of"], obsolete_source_id)
+                self.assertEqual(durable_record["duplicate_of"], obsolete_source_id)
+                self.assertEqual(len(self.read_jsonl(paths["records"])), 2)
+                self.assertEqual(len(self.read_sources(paths["sources"])["sources"]), 2)
+                transition_details = [
+                    item["detail"]
+                    for item in operation["transition_history"]
+                ]
+                last_refresh_index = max(
+                    index
+                    for index, detail in enumerate(transition_details)
+                    if detail == "intent_refreshed"
+                )
+                source_durable_index = transition_details.index("source_durable_durable")
+                self.assertLess(last_refresh_index, source_durable_index)
+
+                later_duplicate = self.post_text("Later duplicate", body, "/tmp/later.md")
+                self.assertEqual(later_duplicate.status_code, 200)
+                self.assertEqual(later_duplicate.json()["status"], "duplicate")
+                self.assertEqual(
+                    later_duplicate.json()["duplicate_reason"],
+                    "exact_content_hash_match",
+                )
+
+    def test_pending_duplicate_becoming_nonduplicate_remains_isolated_and_coherent(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "duplicate to nonduplicate body"
+                seed = self.post_text("Seed", body, "/tmp/seed.md")
+                self.assertEqual(seed.status_code, 200)
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_persist_operation_source_registry_effect",
+                    side_effect=RuntimeError("source effect held"),
+                ):
+                    pending_response = self.post_text("Pending", body, "/tmp/pending.md")
+                self.assertEqual(pending_response.status_code, 500)
+                pending = self.read_operations(paths["operations"])[-1]
+                obsolete_duplicate_id = pending["intended_identities"]["source_id"]
+                self.assertTrue(obsolete_duplicate_id.startswith("ksrc_dup_"))
+
+                registry = self.read_sources(paths["sources"])
+                registry["sources"] = {}
+                registry["duplicate_events"] = []
+                paths["sources"].write_text(json.dumps(registry), encoding="utf-8")
+
+                retry = self.post_text("Pending", body, "/tmp/pending.md")
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(retry.json()["status"], "success")
+
+                operation, durable_source, durable_record = self.assert_ingest_source_record_coherence(
+                    paths,
+                    expected_duplicate=False,
+                    excluded_source_id=obsolete_duplicate_id,
+                )
+                self.assertFalse(durable_record["source_id"].startswith("ksrc_dup_"))
+                self.assertIsNone(durable_source["duplicate_of"])
+                self.assertEqual(durable_source["duplicate_reason"], "")
+                self.assertEqual(operation["intended_effect_payloads"]["duplicate_event"], None)
+
+    def test_pending_duplicate_target_refresh_keeps_duplicate_source_id(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "duplicate target refresh body"
+                seed = self.post_text("Seed A", body, "/tmp/seed-a.md")
+                self.assertEqual(seed.status_code, 200)
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_persist_operation_source_registry_effect",
+                    side_effect=RuntimeError("source effect held"),
+                ):
+                    pending_response = self.post_text("Pending", body, "/tmp/pending.md")
+                self.assertEqual(pending_response.status_code, 500)
+                pending = self.read_operations(paths["operations"])[-1]
+                stable_duplicate_id = pending["intended_identities"]["source_id"]
+                original_target = pending["intended_effect_payloads"]["source"]["duplicate_of"]
+
+                registry = self.read_sources(paths["sources"])
+                target = dict(registry["sources"][original_target])
+                target["source_id"] = "ksrc_manual_refresh_target"
+                target["source_title"] = "Seed B"
+                registry["sources"] = {target["source_id"]: target}
+                paths["sources"].write_text(json.dumps(registry), encoding="utf-8")
+
+                retry = self.post_text("Pending", body, "/tmp/pending.md")
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(retry.json()["status"], "duplicate")
+
+                operation, durable_source, durable_record = self.assert_ingest_source_record_coherence(
+                    paths,
+                    expected_duplicate=True,
+                )
+                self.assertEqual(operation["intended_identities"]["source_id"], stable_duplicate_id)
+                self.assertEqual(durable_record["source_id"], stable_duplicate_id)
+                self.assertEqual(durable_source["duplicate_of"], "ksrc_manual_refresh_target")
+                self.assertNotEqual(durable_source["duplicate_of"], original_target)
+
+    def test_update_operation_intent_failure_blocks_duplicate_transition_effects_then_recovers(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "intent refresh failure body"
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_persist_operation_source_registry_effect",
+                    side_effect=RuntimeError("source effect held"),
+                ):
+                    original = self.post_text("Original", body, "/tmp/original.md")
+                self.assertEqual(original.status_code, 500)
+                pending = self.read_operations(paths["operations"])[0]
+                obsolete_source_id = pending["intended_identities"]["source_id"]
+
+                intervening = self.post_text("Intervening", body, "/tmp/intervening.md")
+                self.assertEqual(intervening.status_code, 200)
+                before_sources = self.read_sources(paths["sources"])
+                before_records = list(self.read_jsonl(paths["records"]))
+
+                with patch.object(
+                    app.knowledge_operations,
+                    "update_operation_intent",
+                    side_effect=RuntimeError("intent refresh failed"),
+                ) as intent_mock:
+                    failed = self.post_text("Original", body, "/tmp/original.md")
+
+                self.assertEqual(failed.status_code, 500)
+                intent_mock.assert_called_once()
+                self.assertEqual(self.read_sources(paths["sources"]), before_sources)
+                self.assertEqual(self.read_jsonl(paths["records"]), before_records)
+                still_pending = self.read_operations(paths["operations"])[0]
+                self.assertNotEqual(still_pending["state"], "complete")
+                self.assertEqual(still_pending["intended_identities"]["source_id"], obsolete_source_id)
+
+                retry = self.post_text("Original", body, "/tmp/original.md")
+                self.assertEqual(retry.status_code, 200)
+                self.assertEqual(retry.json()["status"], "duplicate")
+                self.assert_ingest_source_record_coherence(
+                    paths,
+                    expected_duplicate=True,
+                    excluded_source_id=obsolete_source_id,
+                    operation_index=0,
+                )
 
     def test_record_fsync_failure_is_retried_without_new_record_id(self):
         with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
@@ -1121,14 +1402,19 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                         },
                     )
 
+                before_inventory = self.store_bytes(paths)
                 inventory = self.client.get("/knowledge/operations")
                 self.assertEqual(inventory.status_code, 200)
-                self.assertEqual(inventory.json()["counts"]["pending"], 1)
-                item = inventory.json()["operations"][0]
+                payload = inventory.json()
+                self.assertEqual(set(payload), {"counts", "operations"})
+                self.assert_no_sensitive_operation_fields(payload)
+                self.assertEqual(payload["counts"]["pending"], 1)
+                item = payload["operations"][0]
                 self.assertEqual(item["operation_kind"], "knowledge_ingest")
                 self.assertTrue(item["intended_source_id"])
                 self.assertTrue(item["intended_record_id"])
                 self.assertIn("source_durable", item["effect_progress"])
+                self.assertEqual(self.store_bytes(paths), before_inventory)
 
 
 if __name__ == "__main__":
