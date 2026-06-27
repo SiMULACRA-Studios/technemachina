@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import ExitStack
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -158,6 +158,10 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                     walk(child)
             elif isinstance(value, str):
                 self.assertFalse(Path(value).is_absolute(), value)
+                self.assertFalse(PureWindowsPath(value).is_absolute(), value)
+                self.assertFalse(value.startswith("file:"), value)
+                self.assertFalse(value.startswith("logs/"), value)
+                self.assertFalse(value.startswith("../"), value)
 
         walk(payload)
 
@@ -689,7 +693,7 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
         self.assertEqual(app.knowledge_ingest.ensure_store.__code__.co_firstlineno, 60)
         self.assertEqual(app.knowledge_ingest.save_sources.__code__.co_firstlineno, 111)
         self.assertEqual(app.knowledge_ingest.write_record.__code__.co_firstlineno, 139)
-        self.assertEqual(app.knowledge_ingest.write_knowledge_candidate.__code__.co_firstlineno, 1282)
+        self.assertEqual(app.knowledge_ingest.write_knowledge_candidate.__code__.co_firstlineno, 1292)
         self.assertIn("_write_sources_atomically", app.knowledge_ingest.ensure_store.__code__.co_names)
         self.assertIn("_write_sources_atomically", app.knowledge_ingest.save_sources.__code__.co_names)
         self.assertIn("_append_jsonl_line_durably", app.knowledge_ingest.write_record.__code__.co_names)
@@ -988,6 +992,80 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                     later_duplicate.json()["duplicate_reason"],
                     "exact_content_hash_match",
                 )
+
+    def test_genuine_source_mismatch_conflicts_without_intent_refresh_or_domain_effects(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                body = "genuine source mismatch body"
+                with patch.object(
+                    app.knowledge_ingest,
+                    "_persist_operation_source_registry_effect",
+                    side_effect=RuntimeError("source effect held"),
+                ):
+                    original = self.post_text("Original", body, "/tmp/original.md")
+                self.assertEqual(original.status_code, 500)
+
+                before_operation = self.read_operations(paths["operations"])[0]
+                before_identities = json.loads(
+                    json.dumps(before_operation["intended_identities"])
+                )
+                before_payloads = json.loads(
+                    json.dumps(before_operation["intended_effect_payloads"])
+                )
+                before_history = list(before_operation["transition_history"])
+                obsolete_source_id = before_identities["source_id"]
+                conflicting_source = dict(before_payloads["source"])
+                conflicting_source["content_hash"] = "sha256:genuine-conflict"
+                conflicting_source["lane"] = "conflicting_lane"
+                conflicting_source["source_title"] = "Conflicting occupant"
+                paths["sources"].parent.mkdir(parents=True, exist_ok=True)
+                paths["sources"].write_text(
+                    json.dumps(
+                        {
+                            "sources": {obsolete_source_id: conflicting_source},
+                            "duplicate_events": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                before_sources = self.read_sources(paths["sources"])
+                before_records = self.read_jsonl(paths["records"])
+
+                self.assertIs(
+                    app.knowledge_operations,
+                    app.knowledge_ingest.knowledge_operations,
+                )
+                with patch.object(
+                    app.knowledge_operations,
+                    "update_operation_intent",
+                    wraps=app.knowledge_operations.update_operation_intent,
+                ) as intent_spy:
+                    retry = self.post_text("Original", body, "/tmp/original.md")
+
+                self.assertEqual(retry.status_code, 409)
+                self.assertEqual(retry.json(), {"detail": "knowledge_operation_conflict"})
+                intent_spy.assert_not_called()
+                after_operation = self.read_operations(paths["operations"])[0]
+                self.assertEqual(after_operation["intended_identities"], before_identities)
+                self.assertEqual(after_operation["intended_effect_payloads"], before_payloads)
+                self.assertEqual(after_operation["transition_history"], before_history)
+                self.assertNotEqual(after_operation["state"], "complete")
+                self.assertEqual(self.read_sources(paths["sources"]), before_sources)
+                self.assertEqual(self.read_jsonl(paths["records"]), before_records)
+                registry = self.read_sources(paths["sources"])
+                self.assertEqual(
+                    [
+                        source_id
+                        for source_id in registry.get("sources", {})
+                        if source_id.startswith("ksrc_dup_")
+                    ],
+                    [],
+                )
+                self.assertEqual(registry.get("duplicate_events", []), [])
 
     def test_pending_duplicate_becoming_nonduplicate_remains_isolated_and_coherent(self):
         with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
@@ -1415,6 +1493,118 @@ class KnowledgeIngestCandidateBridgeTests(unittest.TestCase):
                 self.assertTrue(item["intended_record_id"])
                 self.assertIn("source_durable", item["effect_progress"])
                 self.assertEqual(self.store_bytes(paths), before_inventory)
+
+    def test_operation_inventory_is_bounded_newest_first_and_read_only(self):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT) as tempdir:
+            paths, patches = self.isolated_stores(tempdir)
+            with ExitStack() as stack:
+                for item in patches:
+                    stack.enter_context(item)
+
+                operations = []
+                for index in range(73):
+                    if index >= 70:
+                        updated_at = "2026-01-02T00:00:00+00:00"
+                        created_at = "2026-01-02T00:00:00+00:00"
+                        operation_id = f"kop_tie_{chr(ord('a') + index - 70)}"
+                    else:
+                        updated_at = f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}+00:00"
+                        created_at = updated_at
+                        operation_id = f"kop_synthetic_{index:03d}"
+                    operations.append(
+                        {
+                            "operation_id": operation_id,
+                            "operation_kind": "knowledge_ingest",
+                            "request_fingerprint": f"fingerprint-{index}",
+                            "state": "in_progress" if index % 3 == 0 else "complete",
+                            "created_at": created_at,
+                            "updated_at": updated_at,
+                            "canonical_request_inputs": {"body": "hidden"},
+                            "intended_identities": {
+                                "source_id": f"ksrc_{index:03d}",
+                                "record_id": f"krec_{index:03d}",
+                            },
+                            "intended_effect_payloads": {
+                                "source": {"source_path": f"/tmp/source-{index}.md"},
+                                "record": {"body": "hidden", "source_id": f"ksrc_{index:03d}"},
+                                "duplicate_event": None,
+                            },
+                            "effect_progress": {},
+                            "result_identity": {},
+                            "transition_history": [],
+                        }
+                    )
+
+                paths["operations"].parent.mkdir(parents=True, exist_ok=True)
+                paths["operations"].write_text(
+                    json.dumps(
+                        {
+                            "journal_version": "knowledge_operations_v1",
+                            "operations": operations,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                before_inventory = self.store_bytes(paths)
+
+                inventory = self.client.get("/knowledge/operations")
+                self.assertEqual(inventory.status_code, 200)
+                payload = inventory.json()
+                self.assertEqual(set(payload), {"counts", "operations"})
+                self.assertEqual(payload["counts"], {"pending": 25, "complete": 48, "conflict": 0})
+                self.assertEqual(len(payload["operations"]), 50)
+                self.assert_no_sensitive_operation_fields(payload)
+                returned_ids = [
+                    operation["operation_id"]
+                    for operation in payload["operations"]
+                ]
+                expected_ids = [
+                    "kop_tie_a",
+                    "kop_tie_b",
+                    "kop_tie_c",
+                    *[
+                        f"kop_synthetic_{index:03d}"
+                        for index in range(69, 22, -1)
+                    ],
+                ]
+                self.assertEqual(returned_ids, expected_ids)
+                for index in range(23):
+                    self.assertNotIn(f"kop_synthetic_{index:03d}", returned_ids)
+
+                bypass = self.client.get("/knowledge/operations?limit=999")
+                self.assertEqual(bypass.status_code, 200)
+                self.assertEqual(len(bypass.json()["operations"]), 50)
+                self.assertEqual(
+                    [
+                        operation["operation_id"]
+                        for operation in bypass.json()["operations"]
+                    ],
+                    expected_ids,
+                )
+                self.assertEqual(self.store_bytes(paths), before_inventory)
+
+                paths["operations"].write_text(
+                    json.dumps(
+                        {
+                            "journal_version": "knowledge_operations_v1",
+                            "operations": operations[:3],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                small = self.client.get("/knowledge/operations")
+                self.assertEqual(small.status_code, 200)
+                self.assertEqual(
+                    [
+                        operation["operation_id"]
+                        for operation in small.json()["operations"]
+                    ],
+                    [
+                        "kop_synthetic_002",
+                        "kop_synthetic_001",
+                        "kop_synthetic_000",
+                    ],
+                )
 
 
 if __name__ == "__main__":

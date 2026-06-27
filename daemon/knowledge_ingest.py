@@ -426,6 +426,7 @@ def _refresh_ingest_intent_if_needed(
 
     registry = load_sources()
     old_payloads = operation["intended_effect_payloads"]
+    source_match_conflict = False
     try:
         if _source_registry_effect_matches(
             registry,
@@ -441,11 +442,20 @@ def _refresh_ingest_intent_if_needed(
         # source as this operation's conflicting final effect.
         if old_payloads.get("duplicate_event") is not None:
             raise
+        source_match_conflict = True
 
     hash_value = content_hash(normalized_body)
     duplicate = find_duplicate_source(hash_value, source_path=source_path, source_title=title)
     duplicate_of, duplicate_reason = _duplicate_metadata(duplicate, hash_value, source_path)
     identities = dict(operation["intended_identities"])
+    if source_match_conflict:
+        old_source_id = old_payloads["source"].get("source_id")
+        if (
+            not duplicate
+            or duplicate.get("source_id") != old_source_id
+            or duplicate.get("content_hash") != hash_value
+        ):
+            raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
 
     if duplicate_of:
         source_id = identities.get("source_id")

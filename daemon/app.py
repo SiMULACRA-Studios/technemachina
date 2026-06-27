@@ -55,6 +55,7 @@ memory.init_db()
 COMPANION_ASSOCIATION_CONTEXT_LIMIT = 8
 COMPANION_SUGGESTIONS_LIMIT = 3
 COMPANION_DESCRIPTION_MAX_CHARS = 2000
+KNOWLEDGE_OPERATION_STATUS_LIMIT = 50
 
 
 class CompanionRequest(BaseModel):
@@ -336,9 +337,44 @@ async def knowledge_candidates_bridge_status():
 @app.get("/knowledge/operations")
 async def knowledge_operations_status():
     inventory = knowledge_operations.operation_inventory()
+    operations = knowledge_operations.load_operations()
+    operations = sorted(
+        operations,
+        key=lambda item: str(item.get("operation_id", "")),
+    )
+    operations = sorted(
+        operations,
+        key=lambda item: str(item.get("created_at", "")),
+        reverse=True,
+    )
+    operations = sorted(
+        operations,
+        key=lambda item: str(item.get("updated_at", "")),
+        reverse=True,
+    )
+
+    summaries = []
+    for operation in operations[:KNOWLEDGE_OPERATION_STATUS_LIMIT]:
+        identities = operation.get("intended_identities", {})
+        result = operation.get("result_identity", {})
+        summaries.append(
+            {
+                "operation_id": operation.get("operation_id", ""),
+                "operation_kind": operation.get("operation_kind", ""),
+                "state": operation.get("state", ""),
+                "created_at": operation.get("created_at", ""),
+                "updated_at": operation.get("updated_at", ""),
+                "intended_source_id": identities.get("source_id", ""),
+                "intended_record_id": identities.get("record_id", ""),
+                "candidate_id": identities.get("candidate_id", ""),
+                "review_id": result.get("review_id", identities.get("review_id", "")),
+                "effect_progress": operation.get("effect_progress", {}),
+            }
+        )
+
     return {
         "counts": inventory.get("counts", {}),
-        "operations": inventory.get("operations", []),
+        "operations": summaries,
     }
 
 
