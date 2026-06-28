@@ -24,6 +24,7 @@ import memory_retrieval
 import memory_consolidation_worker
 import memory_review_queue
 import knowledge_ingest
+import knowledge_operations
 import synapse_map
 import synapse_analysis
 
@@ -54,6 +55,7 @@ memory.init_db()
 COMPANION_ASSOCIATION_CONTEXT_LIMIT = 8
 COMPANION_SUGGESTIONS_LIMIT = 3
 COMPANION_DESCRIPTION_MAX_CHARS = 2000
+KNOWLEDGE_OPERATION_STATUS_LIMIT = 50
 
 
 class CompanionRequest(BaseModel):
@@ -265,6 +267,9 @@ async def knowledge_records(limit: int = 100, include_inactive: bool = False):
 
 @app.post("/knowledge/ingest-text")
 async def knowledge_ingest_text(req: KnowledgeIngestTextRequest):
+    if not knowledge_ingest.normalize_text(req.body):
+        raise HTTPException(status_code=400, detail="Knowledge body is empty.")
+
     try:
         return knowledge_ingest.ingest_text(
             title=req.title,
@@ -276,8 +281,10 @@ async def knowledge_ingest_text(req: KnowledgeIngestTextRequest):
             created_by=req.created_by,
             provenance=req.provenance,
         )
+    except knowledge_operations.KnowledgeOperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        return {"status": "error", "detail": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/knowledge/search")
@@ -327,8 +334,55 @@ async def knowledge_candidates_bridge_status():
     return knowledge_ingest.knowledge_bridge_status()
 
 
+@app.get("/knowledge/operations")
+async def knowledge_operations_status():
+    inventory = knowledge_operations.operation_inventory()
+    operations = knowledge_operations.load_operations()
+    operations = sorted(
+        operations,
+        key=lambda item: str(item.get("operation_id", "")),
+    )
+    operations = sorted(
+        operations,
+        key=lambda item: str(item.get("created_at", "")),
+        reverse=True,
+    )
+    operations = sorted(
+        operations,
+        key=lambda item: str(item.get("updated_at", "")),
+        reverse=True,
+    )
+
+    summaries = []
+    for operation in operations[:KNOWLEDGE_OPERATION_STATUS_LIMIT]:
+        identities = operation.get("intended_identities", {})
+        result = operation.get("result_identity", {})
+        summaries.append(
+            {
+                "operation_id": operation.get("operation_id", ""),
+                "operation_kind": operation.get("operation_kind", ""),
+                "state": operation.get("state", ""),
+                "created_at": operation.get("created_at", ""),
+                "updated_at": operation.get("updated_at", ""),
+                "intended_source_id": identities.get("source_id", ""),
+                "intended_record_id": identities.get("record_id", ""),
+                "candidate_id": identities.get("candidate_id", ""),
+                "review_id": result.get("review_id", identities.get("review_id", "")),
+                "effect_progress": operation.get("effect_progress", {}),
+            }
+        )
+
+    return {
+        "counts": inventory.get("counts", {}),
+        "operations": summaries,
+    }
+
+
 @app.post("/knowledge/candidates/from-record")
 async def knowledge_candidate_from_record(req: KnowledgeCandidateCreateRequest):
+    if not knowledge_ingest.RECORDS_PATH.exists():
+        raise HTTPException(status_code=400, detail="knowledge_record_not_found")
+
     try:
         return knowledge_ingest.build_candidate_from_knowledge(
             knowledge_record_id=req.knowledge_record_id,
@@ -336,20 +390,27 @@ async def knowledge_candidate_from_record(req: KnowledgeCandidateCreateRequest):
             reason=req.reason,
             force=req.force,
         )
+    except knowledge_operations.KnowledgeOperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        return {"status": "error", "detail": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/knowledge/candidates/{candidate_id}/enqueue")
 async def knowledge_candidate_enqueue(candidate_id: str, req: KnowledgeCandidateEnqueueRequest):
+    if not knowledge_ingest.KNOWLEDGE_CANDIDATES_PATH.exists():
+        raise HTTPException(status_code=400, detail="knowledge_candidate_not_found")
+
     try:
         return knowledge_ingest.enqueue_knowledge_candidate(
             candidate_id=candidate_id,
             reviewed_by=req.reviewed_by,
             notes=req.notes,
         )
+    except knowledge_operations.KnowledgeOperationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        return {"status": "error", "detail": str(exc)}
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # --- End Technemachina Knowledge-to-Candidate Bridge ---

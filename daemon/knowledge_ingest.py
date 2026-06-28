@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import knowledge_operations
 
 
 KNOWLEDGE_DIR = Path(__file__).resolve().parent.parent / "logs" / "knowledge"
@@ -21,21 +25,49 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _write_sources_atomically(registry: dict[str, Any]) -> None:
+    KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(registry, indent=2, ensure_ascii=False)
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{SOURCES_PATH.name}.",
+        suffix=".tmp",
+        dir=str(KNOWLEDGE_DIR),
+        text=True,
+    )
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, SOURCES_PATH)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _append_jsonl_line_durably(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def ensure_store() -> None:
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
     RECORDS_PATH.touch(exist_ok=True)
 
     if not SOURCES_PATH.exists():
-        SOURCES_PATH.write_text(
-            json.dumps(
-                {
-                    "created_at": utc_now(),
-                    "updated_at": utc_now(),
-                    "sources": {}
-                },
-                indent=2
-            ),
-            encoding="utf-8",
+        _write_sources_atomically(
+            {
+                "created_at": utc_now(),
+                "updated_at": utc_now(),
+                "sources": {}
+            }
         )
 
 
@@ -79,7 +111,7 @@ def load_sources() -> dict[str, Any]:
 def save_sources(registry: dict[str, Any]) -> dict[str, Any]:
     ensure_store()
     registry["updated_at"] = utc_now()
-    SOURCES_PATH.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_sources_atomically(registry)
     return registry
 
 
@@ -106,8 +138,7 @@ def load_records(limit: int = 100, include_inactive: bool = False) -> list[dict[
 
 def write_record(record: dict[str, Any]) -> dict[str, Any]:
     ensure_store()
-    with RECORDS_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _append_jsonl_line_durably(RECORDS_PATH, record)
     return record
 
 
@@ -161,6 +192,396 @@ def register_source(
     save_sources(registry)
 
     return source
+
+
+def _ingest_fingerprint(
+    *,
+    title: str,
+    normalized_body: str,
+    source_type: str,
+    source_path: str,
+    origin: str,
+    provenance: str,
+) -> tuple[str, dict[str, Any]]:
+    request_inputs = {
+        "normalized_body_hash": content_hash(normalized_body),
+        "source_type": source_type,
+        "source_path": source_path,
+        "title": title,
+        "origin": origin,
+        "provenance_label": infer_provenance_label(origin, source_type),
+        "provenance": provenance,
+    }
+    return knowledge_operations.make_request_fingerprint(request_inputs), request_inputs
+
+
+def _build_source_payload_for_operation(
+    *,
+    source_id: str,
+    source_title: str,
+    source_type: str,
+    source_path: str,
+    origin: str,
+    tags: list[str],
+    hash_value: str,
+    duplicate_of: str | None,
+    duplicate_reason: str,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    now = utc_now()
+    return {
+        "source_id": source_id,
+        "source_title": source_title,
+        "source_path": source_path,
+        "source_type": source_type,
+        "origin": origin,
+        "provenance_label": infer_provenance_label(origin, source_type),
+        "content_hash": hash_value,
+        "tags": tags,
+        "created_at": created_at or now,
+        "last_ingested_at": now,
+        "duplicate_of": duplicate_of,
+        "duplicate_reason": duplicate_reason,
+        "status": "duplicate" if duplicate_of else "active",
+        "lane": "knowledge",
+        "source_kind": "knowledge",
+        "memory_write_allowed": False,
+        "candidate_path_allowed": False,
+        "registry_version": KNOWLEDGE_VERSION,
+        "policy_version": POLICY_VERSION,
+    }
+
+
+def _build_duplicate_event_for_operation(
+    *,
+    source_id: str,
+    duplicate_of: str | None,
+    hash_value: str,
+    duplicate_reason: str,
+    event_id: str | None = None,
+) -> dict[str, Any] | None:
+    if not duplicate_of:
+        return None
+
+    return {
+        "event_id": event_id or f"kdup_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+        "source_id": source_id,
+        "duplicate_of": duplicate_of,
+        "content_hash": hash_value,
+        "duplicate_reason": duplicate_reason,
+        "created_at": utc_now(),
+    }
+
+
+def _duplicate_metadata(duplicate: dict[str, Any] | None, hash_value: str, source_path: str) -> tuple[str | None, str]:
+    if not duplicate:
+        return None, ""
+
+    if duplicate.get("content_hash") == hash_value:
+        return duplicate.get("source_id"), "exact_content_hash_match"
+    if source_path and duplicate.get("source_path") == source_path:
+        return duplicate.get("source_id"), "source_path_title_match"
+    return duplicate.get("source_id"), "registry_match"
+
+
+def _build_record_payload_for_operation(
+    *,
+    record_id: str,
+    source: dict[str, Any],
+    title: str,
+    normalized_body: str,
+    source_type: str,
+    source_path: str,
+    origin: str,
+    tags: list[str],
+    created_by: str,
+    provenance: str,
+    duplicate_of: str | None,
+    duplicate_reason: str,
+) -> dict[str, Any]:
+    now = utc_now()
+    return {
+        "record_id": record_id,
+        "source_id": source.get("source_id"),
+        "source_title": title,
+        "source_type": source_type,
+        "source_path": source_path,
+        "origin": origin,
+        "provenance_label": source.get("provenance_label", "unknown"),
+        "content_hash": content_hash(normalized_body),
+        "title": title,
+        "summary": compact_text(normalized_body, 280),
+        "body": normalized_body,
+        "tags": tags,
+        "created_by": created_by,
+        "created_at": now,
+        "ingested_at": now,
+        "provenance": provenance or f"Ingested from {origin} as source-backed knowledge.",
+        "status": "duplicate" if duplicate_of else "active",
+        "duplicate_of": duplicate_of,
+        "duplicate_reason": duplicate_reason,
+        "lane": "knowledge",
+        "memory_write_allowed": False,
+        "candidate_path_allowed": False,
+        "knowledge_version": KNOWLEDGE_VERSION,
+        "policy_version": POLICY_VERSION,
+        "doctrine": "Knowledge is ingested, indexed, and searched. Memory is extracted, reviewed, and approved.",
+    }
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _source_registry_effect_matches(
+    registry: dict[str, Any],
+    source: dict[str, Any],
+    duplicate_event: dict[str, Any] | None,
+) -> bool:
+    durable = registry.get("sources", {}).get(source.get("source_id"))
+    if not durable:
+        return False
+
+    if _canonical_json(durable) != _canonical_json(source):
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+
+    events = [
+        event
+        for event in registry.get("duplicate_events", [])
+        if event.get("source_id") == source.get("source_id")
+    ]
+
+    if duplicate_event is None:
+        if events:
+            raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+        return True
+
+    matching = [
+        event
+        for event in events
+        if _canonical_json(event) == _canonical_json(duplicate_event)
+    ]
+    if len(matching) != 1 or len(events) != 1:
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+    return True
+
+
+def _persist_operation_source_registry_effect(operation: dict[str, Any]) -> dict[str, Any]:
+    payloads = operation["intended_effect_payloads"]
+    source = payloads["source"]
+    duplicate_event = payloads.get("duplicate_event")
+    registry = load_sources()
+
+    if _source_registry_effect_matches(registry, source, duplicate_event):
+        return source
+
+    sources = registry.setdefault("sources", {})
+    if source["source_id"] in sources:
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+
+    registry = json.loads(json.dumps(registry, ensure_ascii=False))
+    registry.setdefault("sources", {})[source["source_id"]] = source
+    if duplicate_event is not None:
+        registry.setdefault("duplicate_events", []).append(duplicate_event)
+    save_sources(registry)
+    return source
+
+
+def find_record_by_id(record_id: str) -> tuple[dict[str, Any] | None, int]:
+    ensure_store()
+    matches = []
+    lines_scanned = 0
+
+    for line in RECORDS_PATH.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        lines_scanned += 1
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict") from exc
+        if item.get("record_id") == record_id:
+            matches.append(item)
+
+    if len(matches) > 1:
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+
+    return (matches[0] if matches else None), lines_scanned
+
+
+def _refresh_ingest_intent_if_needed(
+    operation: dict[str, Any],
+    *,
+    title: str,
+    normalized_body: str,
+    source_type: str,
+    source_path: str,
+    origin: str,
+    tags: list[str],
+    created_by: str,
+    provenance: str,
+) -> dict[str, Any]:
+    if operation.get("effect_progress", {}).get("source_durable"):
+        return operation
+
+    registry = load_sources()
+    old_payloads = operation["intended_effect_payloads"]
+    source_match_conflict = False
+    try:
+        if _source_registry_effect_matches(
+            registry,
+            old_payloads["source"],
+            old_payloads.get("duplicate_event"),
+        ):
+            return operation
+    except knowledge_operations.KnowledgeOperationConflict:
+        # A pending non-duplicate may have its deterministic source ID taken by
+        # a later canonical source before its own source effect is durable. In
+        # that case the next duplicate re-evaluation must refresh the pending
+        # operation to a duplicate intent instead of treating the canonical
+        # source as this operation's conflicting final effect.
+        if old_payloads.get("duplicate_event") is not None:
+            raise
+        source_match_conflict = True
+
+    hash_value = content_hash(normalized_body)
+    duplicate = find_duplicate_source(hash_value, source_path=source_path, source_title=title)
+    duplicate_of, duplicate_reason = _duplicate_metadata(duplicate, hash_value, source_path)
+    identities = dict(operation["intended_identities"])
+    if source_match_conflict:
+        old_source_id = old_payloads["source"].get("source_id")
+        if (
+            not duplicate
+            or duplicate.get("source_id") != old_source_id
+            or duplicate.get("content_hash") != hash_value
+        ):
+            raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+
+    if duplicate_of:
+        source_id = identities.get("source_id")
+        if not old_payloads.get("duplicate_event"):
+            source_id = make_duplicate_source_id(hash_value)
+        event_id = (old_payloads.get("duplicate_event") or {}).get("event_id")
+    else:
+        source_id = make_source_id(hash_value)
+        event_id = None
+
+    source = _build_source_payload_for_operation(
+        source_id=source_id,
+        source_title=title,
+        source_type=source_type,
+        source_path=source_path,
+        origin=origin,
+        tags=tags,
+        hash_value=hash_value,
+        duplicate_of=duplicate_of,
+        duplicate_reason=duplicate_reason,
+        created_at=old_payloads["source"].get("created_at"),
+    )
+    duplicate_event = _build_duplicate_event_for_operation(
+        source_id=source_id,
+        duplicate_of=duplicate_of,
+        hash_value=hash_value,
+        duplicate_reason=duplicate_reason,
+        event_id=event_id,
+    )
+    record = _build_record_payload_for_operation(
+        record_id=identities["record_id"],
+        source=source,
+        title=title,
+        normalized_body=normalized_body,
+        source_type=source_type,
+        source_path=source_path,
+        origin=origin,
+        tags=tags,
+        created_by=created_by,
+        provenance=provenance,
+        duplicate_of=duplicate_of,
+        duplicate_reason=duplicate_reason,
+    )
+    new_identities = {
+        **identities,
+        "source_id": source_id,
+    }
+    new_payloads = {
+        "source": source,
+        "duplicate_event": duplicate_event,
+        "record": record,
+    }
+
+    if _canonical_json(new_identities) == _canonical_json(identities) and _canonical_json(new_payloads) == _canonical_json(old_payloads):
+        return operation
+
+    return knowledge_operations.update_operation_intent(
+        operation["operation_id"],
+        intended_identities=new_identities,
+        intended_effect_payloads=new_payloads,
+    )
+
+
+def _prepare_ingest_operation(
+    *,
+    request_fingerprint: str,
+    request_inputs: dict[str, Any],
+    title: str,
+    normalized_body: str,
+    source_type: str,
+    source_path: str,
+    origin: str,
+    tags: list[str],
+    created_by: str,
+    provenance: str,
+) -> dict[str, Any]:
+    hash_value = content_hash(normalized_body)
+    duplicate = find_duplicate_source(hash_value, source_path=source_path, source_title=title)
+    duplicate_of, duplicate_reason = _duplicate_metadata(duplicate, hash_value, source_path)
+    source_id = make_duplicate_source_id(hash_value) if duplicate_of else make_source_id(hash_value)
+    record_id = make_record_id()
+    source = _build_source_payload_for_operation(
+        source_id=source_id,
+        source_title=title,
+        source_type=source_type,
+        source_path=source_path,
+        origin=origin,
+        tags=tags,
+        hash_value=hash_value,
+        duplicate_of=duplicate_of,
+        duplicate_reason=duplicate_reason,
+    )
+    duplicate_event = _build_duplicate_event_for_operation(
+        source_id=source_id,
+        duplicate_of=duplicate_of,
+        hash_value=hash_value,
+        duplicate_reason=duplicate_reason,
+    )
+    record = _build_record_payload_for_operation(
+        record_id=record_id,
+        source=source,
+        title=title,
+        normalized_body=normalized_body,
+        source_type=source_type,
+        source_path=source_path,
+        origin=origin,
+        tags=tags,
+        created_by=created_by,
+        provenance=provenance,
+        duplicate_of=duplicate_of,
+        duplicate_reason=duplicate_reason,
+    )
+    return knowledge_operations.prepare_operation(
+        operation_kind="knowledge_ingest",
+        request_fingerprint=request_fingerprint,
+        canonical_request_inputs=request_inputs,
+        intended_identities={
+            "source_id": source_id,
+            "record_id": record_id,
+        },
+        intended_effect_payloads={
+            "source": source,
+            "duplicate_event": duplicate_event,
+            "record": record,
+        },
+    )
 
 
 def ingest_text(
@@ -496,76 +917,87 @@ def ingest_text(
     created_by: str = "Oracle",
     provenance: str = "",
 ) -> dict[str, Any]:
-    ensure_store()
-
     tags = tags or []
     normalized_body = normalize_text(body)
 
     if not normalized_body:
         raise ValueError("Knowledge body is empty.")
 
-    hash_value = content_hash(normalized_body)
-    duplicate = find_duplicate_source(hash_value, source_path=source_path, source_title=title)
-
-    duplicate_of = duplicate.get("source_id") if duplicate else None
-    duplicate_reason = ""
-
-    if duplicate_of:
-        if duplicate.get("content_hash") == hash_value:
-            duplicate_reason = "exact_content_hash_match"
-        elif source_path and duplicate.get("source_path") == source_path:
-            duplicate_reason = "source_path_title_match"
-        else:
-            duplicate_reason = "registry_match"
-
-    source = register_source(
-        source_title=title,
+    request_fingerprint, request_inputs = _ingest_fingerprint(
+        title=title,
+        normalized_body=normalized_body,
         source_type=source_type,
         source_path=source_path,
         origin=origin,
-        tags=tags,
-        hash_value=hash_value,
-        duplicate_of=duplicate_of,
-        duplicate_reason=duplicate_reason,
+        provenance=provenance,
     )
 
-    record = {
-        "record_id": make_record_id(),
-        "source_id": source.get("source_id"),
-        "source_title": title,
-        "source_type": source_type,
-        "source_path": source_path,
-        "origin": origin,
-        "provenance_label": source.get("provenance_label", "unknown"),
-        "content_hash": hash_value,
-        "title": title,
-        "summary": compact_text(normalized_body, 280),
-        "body": normalized_body,
-        "tags": tags,
-        "created_by": created_by,
-        "created_at": utc_now(),
-        "ingested_at": utc_now(),
-        "provenance": provenance or f"Ingested from {origin} as source-backed knowledge.",
-        "status": "duplicate" if duplicate_of else "active",
-        "duplicate_of": duplicate_of,
-        "duplicate_reason": duplicate_reason,
-        "lane": "knowledge",
-        "memory_write_allowed": False,
-        "candidate_path_allowed": False,
-        "knowledge_version": KNOWLEDGE_VERSION,
-        "policy_version": POLICY_VERSION,
-        "doctrine": "Knowledge is ingested, indexed, and searched. Memory is extracted, reviewed, and approved.",
-    }
+    with knowledge_operations.OPERATION_LOCK:
+        ensure_store()
+        operation = knowledge_operations.get_single_pending_operation(
+            "knowledge_ingest",
+            request_fingerprint,
+        )
+        if operation is None:
+            operation = _prepare_ingest_operation(
+                request_fingerprint=request_fingerprint,
+                request_inputs=request_inputs,
+                title=title,
+                normalized_body=normalized_body,
+                source_type=source_type,
+                source_path=source_path,
+                origin=origin,
+                tags=tags,
+                created_by=created_by,
+                provenance=provenance,
+            )
 
-    write_record(record)
+        operation = _refresh_ingest_intent_if_needed(
+            operation,
+            title=title,
+            normalized_body=normalized_body,
+            source_type=source_type,
+            source_path=source_path,
+            origin=origin,
+            tags=tags,
+            created_by=created_by,
+            provenance=provenance,
+        )
+        source = _persist_operation_source_registry_effect(operation)
+        knowledge_operations.record_operation_progress(
+            operation["operation_id"],
+            "source_durable",
+            result_identity={"source_id": source["source_id"]},
+        )
+
+        record = operation["intended_effect_payloads"]["record"]
+        durable_record, _lines_scanned = find_record_by_id(record["record_id"])
+        if durable_record is None:
+            write_record(record)
+            durable_record = record
+        elif _canonical_json(durable_record) != _canonical_json(record):
+            raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+
+        knowledge_operations.record_operation_progress(
+            operation["operation_id"],
+            "record_durable",
+            result_identity={"record_id": record["record_id"]},
+        )
+        knowledge_operations.complete_operation(
+            operation["operation_id"],
+            result_identity={
+                "source_id": source["source_id"],
+                "record_id": record["record_id"],
+            },
+        )
 
     return {
-        "status": "duplicate" if duplicate_of else "success",
-        "duplicate": bool(duplicate_of),
-        "duplicate_of": duplicate_of,
-        "duplicate_reason": duplicate_reason,
+        "status": "duplicate" if record.get("duplicate_of") else "success",
+        "duplicate": bool(record.get("duplicate_of")),
+        "duplicate_of": record.get("duplicate_of"),
+        "duplicate_reason": record.get("duplicate_reason", ""),
         "source": source,
-        "record": record,
+        "record": durable_record,
         "doctrine": "Knowledge ingest does not write durable memory.",
     }
 
@@ -859,8 +1291,7 @@ def load_knowledge_candidates(limit: int = 100, include_closed: bool = True) -> 
 
 def write_knowledge_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     ensure_candidate_store()
-    with KNOWLEDGE_CANDIDATES_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(candidate, ensure_ascii=False) + "\n")
+    _append_jsonl_line_durably(KNOWLEDGE_CANDIDATES_PATH, candidate)
     return candidate
 
 
@@ -1020,21 +1451,20 @@ def build_candidate_from_knowledge(
     }
 
 
-def enqueue_knowledge_candidate(candidate_id: str, reviewed_by: str = "Oracle", notes: str = "") -> dict[str, Any]:
-    import memory_review_queue
+def _enqueue_fingerprint(candidate_id: str) -> tuple[str, dict[str, Any]]:
+    request_inputs = {
+        "candidate_id": candidate_id,
+        "action": "enqueue_knowledge_candidate",
+    }
+    return knowledge_operations.make_request_fingerprint(request_inputs), request_inputs
 
-    candidates = load_knowledge_candidates(limit=100000, include_closed=True)
-    candidate = None
 
-    for item in candidates:
-        if item.get("candidate_id") == candidate_id:
-            candidate = item
-            break
-
-    if not candidate:
-        raise ValueError("knowledge_candidate_not_found")
-
-    candidate_record = {
+def _candidate_record_for_enqueue(
+    candidate: dict[str, Any],
+    *,
+    reviewed_by: str,
+) -> dict[str, Any]:
+    return {
         "record_type": candidate.get("suggested_record_type", "research_note"),
         "layer": candidate.get("suggested_layer", "alpha"),
         "scope": "technemachina_daemon",
@@ -1056,34 +1486,178 @@ def enqueue_knowledge_candidate(candidate_id: str, reviewed_by: str = "Oracle", 
         "importance_weight": 0.7 if candidate.get("importance") == "high" else 0.5,
     }
 
-    review = memory_review_queue.create_review_item(
-        candidate_record=candidate_record,
-        suggested_action="approve",
-        reason=notes or candidate.get("why_candidate", "Knowledge candidate proposed for review."),
-        source_refs=[
-            candidate.get("knowledge_record_id", ""),
-            candidate.get("source_id", ""),
-            candidate.get("candidate_id", ""),
-        ],
-        related_record_ids=[],
-        conflicting_record_ids=[],
-        original_record=candidate,
-        created_by=reviewed_by,
+
+def _prepare_enqueue_operation(
+    *,
+    request_fingerprint: str,
+    request_inputs: dict[str, Any],
+    candidate: dict[str, Any],
+    reviewed_by: str,
+) -> dict[str, Any]:
+    candidate_record = _candidate_record_for_enqueue(candidate, reviewed_by=reviewed_by)
+    return knowledge_operations.prepare_operation(
+        operation_kind="knowledge_candidate_enqueue",
+        request_fingerprint=request_fingerprint,
+        canonical_request_inputs=request_inputs,
+        intended_identities={
+            "candidate_id": candidate.get("candidate_id", ""),
+        },
+        intended_effect_payloads={
+            "candidate_record": candidate_record,
+            "original_candidate": candidate,
+        },
     )
 
-    event = {
+
+def _review_for_candidate(candidate_id: str) -> dict[str, Any] | None:
+    import memory_review_queue
+
+    pending = []
+    non_pending = []
+    for item in memory_review_queue.load_queue(include_closed=True):
+        original = item.get("original_record", {})
+        if original.get("candidate_id") != candidate_id:
+            continue
+        if item.get("review_status") == "pending":
+            pending.append(item)
+        else:
+            non_pending.append(item)
+
+    if len(pending) > 1 or non_pending:
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+    return pending[0] if pending else None
+
+
+def _queued_event_matches(event: dict[str, Any], expected: dict[str, Any]) -> bool:
+    keys = {
+        "candidate_id",
+        "knowledge_record_id",
+        "source_id",
+        "source_title",
+        "review_status",
+        "review_id",
+        "queued_by",
+    }
+    return all(event.get(key) == expected.get(key) for key in keys)
+
+
+def _queued_event_for_review(
+    candidate: dict[str, Any],
+    *,
+    review_id: str,
+    reviewed_by: str,
+) -> dict[str, Any]:
+    return {
         **candidate,
         "review_status": "candidate_queued",
-        "review_id": review.get("review_id"),
+        "review_id": review_id,
         "queued_at": utc_now(),
         "queued_by": reviewed_by,
     }
-    write_knowledge_candidate(event)
+
+
+def _find_queued_event(candidate_id: str, review_id: str, expected: dict[str, Any]) -> dict[str, Any] | None:
+    matches = [
+        event
+        for event in load_knowledge_candidate_events_raw(limit=100000, include_closed=True)
+        if event.get("candidate_id") == candidate_id
+        and event.get("review_status") == "candidate_queued"
+        and event.get("review_id") == review_id
+    ]
+
+    if len(matches) > 1:
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+    if not matches:
+        return None
+    if not _queued_event_matches(matches[0], expected):
+        raise knowledge_operations.KnowledgeOperationConflict("knowledge_operation_conflict")
+    return matches[0]
+
+
+def enqueue_knowledge_candidate(candidate_id: str, reviewed_by: str = "Oracle", notes: str = "") -> dict[str, Any]:
+    import memory_review_queue
+
+    candidates = load_knowledge_candidates(limit=100000, include_closed=True)
+    candidate = None
+
+    for item in candidates:
+        if item.get("candidate_id") == candidate_id:
+            candidate = item
+            break
+
+    if not candidate:
+        raise ValueError("knowledge_candidate_not_found")
+
+    request_fingerprint, request_inputs = _enqueue_fingerprint(candidate_id)
+
+    with knowledge_operations.OPERATION_LOCK:
+        ensure_candidate_store()
+        operation = knowledge_operations.get_single_pending_operation(
+            "knowledge_candidate_enqueue",
+            request_fingerprint,
+        )
+        if operation is None:
+            operation = _prepare_enqueue_operation(
+                request_fingerprint=request_fingerprint,
+                request_inputs=request_inputs,
+                candidate=candidate,
+                reviewed_by=reviewed_by,
+            )
+
+        candidate_record = operation["intended_effect_payloads"]["candidate_record"]
+        review = _review_for_candidate(candidate_id)
+        if review is None:
+            review = memory_review_queue.create_review_item(
+                candidate_record=candidate_record,
+                suggested_action="approve",
+                reason=notes or candidate.get("why_candidate", "Knowledge candidate proposed for review."),
+                source_refs=[
+                    candidate.get("knowledge_record_id", ""),
+                    candidate.get("source_id", ""),
+                    candidate.get("candidate_id", ""),
+                ],
+                related_record_ids=[],
+                conflicting_record_ids=[],
+                original_record=candidate,
+                created_by=reviewed_by,
+            )
+
+        knowledge_operations.record_operation_progress(
+            operation["operation_id"],
+            "review_durable",
+            result_identity={"review_id": review.get("review_id", "")},
+        )
+
+        event = _queued_event_for_review(
+            candidate,
+            review_id=review.get("review_id", ""),
+            reviewed_by=reviewed_by,
+        )
+        durable_event = _find_queued_event(candidate_id, review.get("review_id", ""), event)
+        if durable_event is None:
+            write_knowledge_candidate(event)
+            durable_event = event
+
+        knowledge_operations.record_operation_progress(
+            operation["operation_id"],
+            "candidate_event_durable",
+            result_identity={
+                "candidate_id": candidate_id,
+                "review_id": review.get("review_id", ""),
+            },
+        )
+        knowledge_operations.complete_operation(
+            operation["operation_id"],
+            result_identity={
+                "candidate_id": candidate_id,
+                "review_id": review.get("review_id", ""),
+            },
+        )
 
     return {
         "status": "success",
         "review": review,
-        "candidate": event,
+        "candidate": durable_event,
         "doctrine": "Candidate was enqueued for Oracle review; durable memory was not written.",
     }
 
@@ -1946,7 +2520,7 @@ def knowledge_candidate_status() -> dict[str, Any]:
     }
 
 
-_previous_build_candidate_from_knowledge_v028c1b = build_candidate_from_knowledge
+_final_build_candidate_from_knowledge_v028c1b_wrapper = build_candidate_from_knowledge
 
 
 def build_candidate_from_knowledge(
