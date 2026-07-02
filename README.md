@@ -319,27 +319,39 @@ Runtime-generated directories and private-state files may be absent in a fresh c
 
 ## Requirements
 
-Verified development environment:
+Verified daemon environment:
 
 - macOS
-- Python **3.13.5**
+- Python 3.13.x, verified on Python 3.13.5
 - `pip`
 - A supported AI provider key for provider-backed chat
 
-Python dependencies are listed in:
+Daemon support policy:
+
+- Python 3.13 is supported.
+- Python 3.14 is experimental. The daemon test suite passes, but the current Google Gen AI SDK emits a deprecation warning.
+- Python 3.12 is untested and is not currently claimed supported.
+- macOS is verified.
+- Linux is untested and provisional.
+- Windows is unsupported because current audit-log and decision-ledger locking imports `fcntl`.
+
+Production dependencies are declared in:
 
 ```text
 daemon/requirements.txt
 ```
 
-Current backend dependencies include:
+Development and test dependencies are declared separately in:
 
-- FastAPI
-- Uvicorn
-- Pydantic
-- Google Gen AI SDK
+```text
+tests/requirements.txt
+```
 
-Ollama support is present in the codebase through its Python client, but it is not required for the current verified launch path. Gemini is the active provider in the verified baseline, while OpenRouter support is optional.
+The requirement files use bounded compatible ranges. They reduce uncontrolled dependency drift but are not an exact lock of every transitive package version.
+
+Ollama is not part of the current executable daemon dependency set. The verified provider path is Gemini, with optional OpenRouter support. Historical Ollama research references do not represent current executable support.
+
+The companion archive under `tools/companion_archive/` is a separate tool surface. Its current pinned dependencies are verified on Python 3.13. Python 3.14 is unsupported under the current pins, and other Python versions are untested. Playwright browser installation is a separate explicit step and is not part of daemon setup.
 
 ---
 
@@ -354,12 +366,16 @@ cd Technemachina-Daemon-v0.1
 Create the backend virtual environment:
 
 ```bash
-cd daemon
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv daemon/.venv
+source daemon/.venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-cd ..
+python -m pip install -r daemon/requirements.txt
+```
+
+For development and test verification, install the separate test requirements:
+
+```text
+python -m pip install -r tests/requirements.txt
 ```
 
 Create your local environment file:
@@ -379,6 +395,36 @@ OPENROUTER_API_KEY=
 ```
 
 Do not commit `.env`.
+
+---
+
+## Testing
+
+From the repository root, with the daemon virtual environment active, run the canonical test suite with:
+
+```text
+python -m pytest tests/
+```
+
+The current verified baseline is:
+
+```text
+165 tests passed
+126 subtests passed
+```
+
+The equivalent `unittest` identity set may be checked as a secondary verification command:
+
+```text
+python -m unittest discover -s tests -v
+```
+
+The current verified secondary baseline is:
+
+```text
+Ran 165 tests
+OK
+```
 
 ---
 
