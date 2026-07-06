@@ -1,5 +1,4 @@
-fastapi
-uvicorn
-ollama
-pydantic
-google-genai
+fastapi>=0.139,<0.140
+uvicorn>=0.49,<0.50
+pydantic>=2.13,<3
+google-genai>=2.10,<3
