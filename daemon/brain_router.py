@@ -17,7 +17,13 @@ PROVIDER_ORDER = [
 ]
 
 
-def route(prompt: str, provider: str = "auto") -> str:
+def route(
+    prompt: str,
+    provider: str = "auto",
+    *,
+    provider_executor=None,
+    injection_disclosure: str = "",
+) -> str:
     """
     Multi-brain router for Technemachina Daemon.
 
@@ -39,6 +45,11 @@ def route(prompt: str, provider: str = "auto") -> str:
         - records final outcome
     """
 
+    if provider_executor is not None and not injection_disclosure.strip():
+        raise ValueError(
+            "Explicit provider injection requires a non-empty disclosure."
+        )
+
     normalized_provider = normalize_provider(provider)
 
     if normalized_provider and normalized_provider != "auto":
@@ -49,7 +60,16 @@ def route(prompt: str, provider: str = "auto") -> str:
         )
 
         try:
-            response = route_specific(prompt, normalized_provider, decision)
+            if provider_executor is None:
+                response = route_specific(prompt, normalized_provider, decision)
+            else:
+                response = route_specific(
+                    prompt,
+                    normalized_provider,
+                    decision,
+                    provider_executor=provider_executor,
+                    injection_disclosure=injection_disclosure,
+                )
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
             record_all_failed(decision, detail)
@@ -68,7 +88,16 @@ def route(prompt: str, provider: str = "auto") -> str:
 
     for provider_name in PROVIDER_ORDER:
         try:
-            response = route_specific(prompt, provider_name, decision)
+            if provider_executor is None:
+                response = route_specific(prompt, provider_name, decision)
+            else:
+                response = route_specific(
+                    prompt,
+                    provider_name,
+                    decision,
+                    provider_executor=provider_executor,
+                    injection_disclosure=injection_disclosure,
+                )
         except Exception as e:
             detail = f"{type(e).__name__}: {e}"
             errors.append(f"{provider_name}: {detail}")
@@ -121,18 +150,42 @@ def route(prompt: str, provider: str = "auto") -> str:
     )
 
 
-def route_specific(prompt: str, provider: str, decision=None) -> str:
+def route_specific(
+    prompt: str,
+    provider: str,
+    decision=None,
+    *,
+    provider_executor=None,
+    injection_disclosure: str = "",
+) -> str:
     normalized = normalize_provider(provider)
 
     if decision is not None:
         decision.provider_path.append(normalized)
 
+    attempt_detail = "Routing prompt to provider."
+    if provider_executor is not None:
+        attempt_detail = injection_disclosure
+
     write_event(
         event_type="provider_attempt",
         status="started",
         provider=normalized,
-        detail="Routing prompt to provider.",
+        detail=attempt_detail,
     )
+
+    if provider_executor is not None:
+        response = provider_executor(normalized, prompt)
+        write_event(
+            event_type="provider_success",
+            status="success",
+            provider=normalized,
+            detail=(
+                "Injected provider executor returned successfully. "
+                f"{injection_disclosure}"
+            ),
+        )
+        return response
 
     if normalized == "gemini":
         response = gemini_provider.query(prompt)

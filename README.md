@@ -506,6 +506,29 @@ Diagnostic logs are written under:
 logs/diagnostics/
 ```
 
+### Offline Integrity Demonstrator
+
+The Build Week Integrity Demonstrator runs entirely against a tracked fixture
+in a fresh temporary directory. It requires an explicit local rejection
+attestation, deterministically exhausts providers through a disclosed injection
+seam, proves protected memory is unchanged, and emits JSON and Markdown
+evidence:
+
+```bash
+python3 scripts/run_integrity_demonstrator.py
+```
+
+Technemachina's daemon, governed-memory review/rejection path, provider router,
+audit log, and decision ledger predate OpenAI Build Week. The Build Week work is
+this isolated demonstrator, canonical protected-state proof, disclosed failure
+injection seam, offline evidence doctor, documentation, and focused tests; it
+does not claim the broader Technemachina foundation was built during the event.
+
+It does not authenticate the attested actor's identity and does not read living
+memory, provider credentials, or private runtime state. See
+[`docs/integrity-demonstrator.md`](docs/integrity-demonstrator.md) for the
+canonicalization contract, test-only mode, offline doctor, and limitations.
+
 ---
 
 ## Important Endpoints
