@@ -529,6 +529,53 @@ memory, provider credentials, or private runtime state. See
 [`docs/integrity-demonstrator.md`](docs/integrity-demonstrator.md) for the
 canonicalization contract, test-only mode, offline doctor, and limitations.
 
+## Built with GPT-5.6 and Codex
+
+The pre-existing Technemachina daemon was meaningfully extended for OpenAI Build
+Week using GPT-5.6 Sol (`gpt-5.6-sol`) in Codex. The majority of the
+submission’s core functionality was built in the following Codex thread:
+
+```text
+/feedback session ID: 019f7f87-37d5-7ec0-a82c-aca523a76785
+Model: GPT-5.6 Sol (gpt-5.6-sol), medium reasoning
+Build Week baseline: e05f900d1969ca51a7ef700bb42fd573628b6b91
+Core implementation commit: 92012087b943023ba85940bb885946163390109c
+```
+
+The project owner made the central product and governance decisions: reduce the
+submission to one auditable integrity story; preserve the existing daemon as
+pre-Build-Week foundation; define protected-memory invariants; require a
+review-bound human rejection; disclose deterministic provider failures; avoid
+living user state and provider credentials; and describe the authority boundary
+as local human attestation rather than authenticated identity.
+
+Codex accelerated the repository analysis and implementation. It traced the
+existing memory-review, rejection, provider-routing, audit, and decision-ledger
+paths; implemented the isolated demonstrator, canonical state proof, disclosed
+provider-executor seam, offline doctor, fixture, documentation, and tests; and
+performed the clean-clone verification.
+
+Codex also conducted an adversarial correction pass. That review strengthened
+independent digest and fixture recomputation, complete durable-store comparison,
+routing-decision validation, audit-event validation, duplicate-record handling,
+run-directory isolation, actor-label privacy, tamper tests, and detached-HEAD
+clean-clone support.
+
+The core implementation delta is intentionally explicit and reviewable:
+
+```bash
+git diff e05f900d1969ca51a7ef700bb42fd573628b6b91..92012087b943023ba85940bb885946163390109c
+```
+
+At the core implementation commit, a detached clean-clone verification passed
+the documented demonstration, independent offline doctor, and four documented
+test suites. Judges can reproduce the verification using the commands in
+`docs/integrity-demonstrator.md`.
+
+The owner personally completed the final interactive
+`REJECT <review-id>` challenge. Codex did not synthesize, prefill, pipe, or
+automatically enter that rejection.
+
 ---
 
 ## Important Endpoints
